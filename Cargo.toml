@@ -20,8 +20,5 @@ rppal = "1.5"
 # Para obtener información del sistema (CPU, memoria, IP)
 sys-infos = "0.1"
 
-# Python embebido (para módulos que aún no se migran a Rust)
-pyembed = "0.4"
-
 # Para tiempos y procesos
 timeout = "0.2"
