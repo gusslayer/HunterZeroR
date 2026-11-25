@@ -3,6 +3,7 @@
  * - Header: SÓLO íconos de sistema (sin texto)
  * - Footer: UN Solo conjunto fijo de hints (sin cambios de estado)
  * - Sin títulos de módulo, sin texto de recursos
+ * - Contenido solo en el área usable (Y=20 a Y=219)
  */
 
 use ggez;
@@ -29,9 +30,7 @@ mod core::input;
 mod core::plugins;
 mod core::state;
 mod core::system_stats;
-mod core::process_manager;
 mod core::ui::hud;
-mod core::ui::footer;
 mod modules::ping::screen::PingScreen;
 mod modules::nmap::screen::NmapScreen;
 mod modules::nslookup::screen::NsLookupScreen;
@@ -57,36 +56,35 @@ impl ToolScreen for PingScreen {
         canvas.set_color(BG_COLOR);
         canvas.clear();
 
-        // --- Contenido en el área usable de 200px ---
-        
-        // Título dentro del área usable
+        // --- Contenido en el área usable de 200px (Y desde 20) ---
+        // Título dentro del área usable (empezando en Y=20, no Y=15 que está en header)
         let title_text = graphics::Text::new(ctx, "PING MANUAL", 8)?;
         title_text.draw(
             ctx,
-            graphics::Point::new(SCREEN_VIRTUAL_WIDTH as f32 / 2.0 - title_text.width(ctx)? / 2.0, 15.0),
+            graphics::Point::new(SCREEN_VIRTUAL_WIDTH as f32 / 2.0 - title_text.width(ctx)? / 2.0, 25.0),
             ACCENT_COLOR,
         )?;
 
         // Mostrar IP actual (aunque esté siendo editada)
         let ip_text = graphics::Text::new(ctx, "IP: ", 8)?;
-        ip_text.draw(ctx, graphics::Point::new(10.0, 35.0), TEXT_COLOR)?;
+        ip_text.draw(ctx, graphics::Point::new(10.0, 45.0), TEXT_COLOR)?;
 
         // Mostrar cantidad de paquetes
         let packets_text = graphics::Text::new(ctx, "Paquetes: 2", 8)?;
-        packets_text.draw(ctx, graphics::Point::new(10.0, 55.0), TEXT_COLOR)?;
+        packets_text.draw(ctx, graphics::Point::new(10.0, 65.0), TEXT_COLOR)?;
 
         // Instrucciones dentro del área usable (hasta Y=220)
         let instr_text = graphics::Text::new(
             ctx, 
-            "D-pad: cambia octeto A: guarda START: envía B: cancela", 
+            "D-pad: cambia octeto  A: guarda  START: envía  B: cancela", 
             7
         )?;
-        instr_text.draw(ctx, graphics::Point::new(10.0, 75.0), TEXT_COLOR)?;
+        instr_text.draw(ctx, graphics::Point::new(10.0, 85.0), TEXT_COLOR)?;
 
         // Mostrar fase actual
         let phase_text = "Seleccionando octeto IP";
         let phase_instr = graphics::Text::new(ctx, phase_text, 7)?;
-        phase_instr.draw(ctx, graphics::Point::new(10.0, 90.0), TEXT_COLOR)?;
+        phase_instr.draw(ctx, graphics::Point::new(10.0, 100.0), TEXT_COLOR)?;
 
         Ok(())
     }
@@ -141,14 +139,14 @@ impl ToolScreen for NmapScreen {
         canvas.clear();
 
         let title = graphics::Text::new(ctx, "ESCANEO NMAP", 8)?;
-        title.draw(ctx, graphics::Point::new(10.0, 15.0), ACCENT_COLOR)?;
+        title.draw(ctx, graphics::Point::new(10.0, 25.0), ACCENT_COLOR)?;
 
         let mode_text = "Modo: TCP connect (-sT)";
         let mode_instr = graphics::Text::new(ctx, mode_text, 7)?;
-        mode_instr.draw(ctx, graphics::Point::new(10.0, 30.0), TEXT_COLOR)?;
+        mode_instr.draw(ctx, graphics::Point::new(10.0, 40.0), TEXT_COLOR)?;
 
-        let instr = graphics::Text::new(ctx, "D-pad: cambiar modo A: seleccionar B: volver START: escanear", 7)?;
-        instr.draw(ctx, graphics::Point::new(10.0, 45.0), TEXT_COLOR)?;
+        let instr = graphics::Text::new(ctx, "D-pad: cambiar modo  A: seleccionar  B: volver  START: escanear", 7)?;
+        instr.draw(ctx, graphics::Point::new(10.0, 55.0), TEXT_COLOR)?;
 
         Ok(())
     }
@@ -265,16 +263,13 @@ struct HunterZeroApp {
 impl HunterZeroApp {
     fn new(ctx: &mut Context) -> GameResult<Self> {
         let font_8 = graphics::Font::new(ctx, "assets/fonts/PressStart2P-Regular.ttf", 8)?;
-        let modules = vec![
-            // Módulos registrados
-        ];
-        let catalog = PluginCatalog::new(Path::new("modules"));
+        let catalog = core::plugins::PluginCatalog::new(Path::new("modules"));
         let ui_state = core::state::UIState::new();
         let stats_reader = SystemStats::read();
 
         Ok(Self {
             font_8,
-            state: core::state::AppState::Menu(modules),
+            state: core::state::AppState::Menu(vec![]),
             selected_module: None,
             frame_counter: 0,
             catalog,

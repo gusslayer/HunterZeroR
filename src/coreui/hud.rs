@@ -26,18 +26,23 @@ const CONTENT_END_Y: f32 = FOOTER_Y; // 220.0
 
 // --- Header: SÓLO ÍCONOS SISTEMA (sin texto) ---
 //
-// Tres iconos pequeños en la parte superior:
-// 1. Ícono de red/conectividad (izquierda)
-// 2. Ícono de estado (centro)
-// 3. Ícono de información (derecha)
+// Tres iconos pequeños en la parte superior, posiciones X FIXAS:
+// 1. Ícono Izquierda: x=4  - Señal de red/conectividad (⎋)
+// 2. Ícono Centro:   x=160 - Estado del sistema (⎊)
+// 3. Ícono Derecha:  x=316 - Información/ayuda (ℹ)
 //
-// Sin texto "HUNTERZERO", sin "CPU: MEM: WiFi:"
-// Solo gráficos pixel art de 16x16 o 20x20 píxeles cada uno
+// Sin texto "HUNTERZERO", sin títulos de módulo.
+// Solo gráficos pixel art de 16x16 píxeles cada uno, alineados a la grilla de 320x240 virtual.
+//
+// Distribución exacta (DISEÑO_INTERFAZ.md):
+//   x=4:   ⎋ (izquierda)
+//   x=160: ⎊ (centro)
+//   x=316: ℹ (derecha)
 
-/// Dibuja el header SOLAMENTE con iconos de sistema.
-///
-/// NO dibuja texto de recursos (CPU, MEM, WiFi) ni título "HUNTERZERO".
-/// Solo 3-4 iconos pequeños en la fila superior.
+//! Dibuja el header SOLAMENTE con iconos de sistema.
+//!
+//! NO dibuja texto de recursos (CPU, MEM, WiFi) ni título "HUNTERZERO".
+//! Solo 3 iconos pequeños en la fila superior, posiciones X fijas.
 pub fn draw_icon_header(
     ctx: &mut Context,
     canvas: &mut graphics::Canvas,
@@ -54,21 +59,21 @@ pub fn draw_icon_header(
     let icon1 = graphics::Text::new(ctx, "⎋", 12)?; // glifo pequeño
     icon1.draw(ctx, graphics::Point::new(4.0, 4.0), *ACCENT_COLOR)?;
 
-    // Ícono 2: Estado (centro)
+    // Ícono 2: Estado (centro - x=160)
     // Representa métricas/sistema
     let icon2 = graphics::Text::new(ctx, "⎊", 12)?; // glifo de estado
     icon2.draw(
         ctx,
-        graphics::Point::new(SCREEN_VIRTUAL_WIDTH as f32 / 2.0 - 8.0, 4.0),
+        graphics::Point::new(160.0, 4.0),
         *ACCENT_COLOR,
     )?;
 
-    // Ícono 3: Información (derecha)
+    // Ícono 3: Información (derecha - x=316)
     // Representa configuración/ayuda
     let icon3 = graphics::Text::new(ctx, "ℹ", 12)?;
     icon3.draw(
         ctx,
-        graphics::Point::new(SCREEN_VIRTUAL_WIDTH as f32 - 20.0, 4.0),
+        graphics::Point::new(316.0, 4.0),
         *ACCENT_COLOR,
     )?;
 

@@ -52,8 +52,6 @@ stateDiagram-v2
     
     note right of Menu
         Render: Lista de módulos con:
-        - Nombre (fuente Press Start 2P, tamaño 16)
-        - Descripción corta
         - Ícono a la izquierda
         - Navegación D-pad up/down
         SELECT: A para abrir
@@ -61,17 +59,16 @@ stateDiagram-v2
     
     note right of ModuleRunning
         Render: Pantalla "EN CURSO" con:
-        - Título del módulo
         - Objetivo/IP objetivo
         - Contador de tiempo/timeout
-        - Footer: B CANCELAR solo
+        - Footer: D-PAD Mover, A Abrir, START Ejecutar, B Volver (siempre fijo)
         Estado en tiempo real de proceso hijo
     end note
     
     note right of ModuleResult
         Render: Resultados capturados con:
         - Salida última(s) del comando
-        - Footer: A OPCIONES / B VOLVER
+        - Footer: D-PAD Mover, A Abrir, START Ejecutar, B Volver (siempre fijo)
         - A = volver al menú de opciones del módulo
         - B = regresar al menú principal
     end note
@@ -85,27 +82,29 @@ stateDiagram-v2
 
 ```
 +----------------------------------------+
-|          HUNTERZERO                   |
-|----------------------------------------|
-| [PING]   ICMP Echo Request           |
-| [NMAP]   Escaneo de puertos TCP      |
-| [NSLOOKUP] Resolución DNS interactiva |
-| [BLEEDING] Bluetooth scanning        |
-| [MONITOR]  CPU, Mem, Temperatura     |
-| [PROC MON] Lista de procesos         |
-|----------------------------------------|
-| D-PAD Mover         A Abrir     START Abrir |
+|  ⎋     ⎊     ℹ    |  (3 íconos en header, SIN texto) |
+|                    |                                    |
+|                    |  (área usable: 200px de altura, Y=20 a Y=219) |
+|                    |                                    |
+|                    |                                    |
++----------------------------------------+
+| D-PAD Mover  A Abrir  START Ejecutar  B Volver |  (footer FIXTO, 20px, siempre igual) |
 +----------------------------------------+
 ```
+
+**Notas:**
+- ❌ **SIN título "HUNTERZERO"** en el header
+- ❌ **SIN nombres de módulo** ([PING], [NMAP], etc.) en el header
+- ✅ SÓLO 3 íconos en el header: ⎋ (red), ⎊ (sistema), ℹ (ayuda)
+- ✅ Footer siempre igual: 4 hints fijos en x=4, 116, 188, 272
 
 ### Módulo PING - Fase CONFIGURAR
 
 ```
 +----------------------------------------+
-|           CONFIGURAR                  |
-|----------------------------------------|
-| IP: 192.168.1.1                        |
-| PAQUETES: 2                            |
+|                                        |
+|  IP: 192.168.1.1                        |
+|  PAQUETES: 2                            |
 |                                        |
 |  Ajusta parámetros con D-pad         |
 | LEFT/RIGHT: Cambiar IP                |
@@ -118,14 +117,13 @@ stateDiagram-v2
 
 ```
 +----------------------------------------+
-|             EN CURSO                  |
-|----------------------------------------|
-| Módulo: PING                           |
-| Objetivo: 192.168.1.1                   |
+|                                        |
+|  Módulo: PING                           |
+|  Objetivo: 192.168.1.1                   |
 |                                        |
 |   [     |   ]  Procesando...           |
 |                                        |
-|  B CANCELAR                             |
+|  D-PAD Mover  A Abrir  START Ejecutar  B Volver |
 +----------------------------------------+
 ```
 
@@ -137,7 +135,7 @@ stateDiagram-v2
 |  64 bytes from 192.168.1.1: icmp_seq=1  |
 |  ttl=64 time=12.3 ms                    |
 |                                        |
-|  A OPCIONES    B VOLVER                |
+|  D-PAD Mover  A Abrir  START Ejecutar  B Volver |
 +----------------------------------------+
 ```
 
@@ -147,15 +145,19 @@ stateDiagram-v2
 +----------------------------------------+
 |             AYUDA PING                |
 |----------------------------------------|
-| CONFIGURAR                              |
-|   IP DESTINO: D-pad mueve entre digitos |
-|   y cambia su valor.                     |
-|                                          
-| EJECUTAR                                |
-|   Selecciona ENVIAR PING y confirma con A|
-|   B cancela.                             |
-|                                          
-| ARR/ABA TEXTO  A VOLVER    B SALIR       |
+|                                        |
+|  IP DESTINO: D-pad mueve entre digitos |
+|  y cambia su valor.                     |
+|                                        |
+|  D-pad: mover cursor                    |
+|  A: seleccionar                         |
+|  DEL: borrar                            |
+|  B: cancelar                            |
+|  START: validar                         |
+|                                        |
+|  ARR/ABA TEXTO  A VOLVER    B SALIR     |
+|                                        |
+|  D-PAD Mover  A Abrir  START Ejecutar  B Volver |
 +----------------------------------------+
 ```
 
@@ -293,9 +295,9 @@ O en `Cargo.toml` / configuración de build:
 
 ### Fase 2: Integración Básica (Semana 3-4)
 - [ ] Todas las flechas del menú navegan correctamente
-- [ ] Abrir módulo PING muestra "EN CURSO" y resultados
+- [ ] Abrir módulo PING muestra contenido en área usable (Y=20 a Y=219)
 - [ ] B regresar funciona en todas las pantallas
-- [ ] Footer hints consistentes con Python
+- [ ] Footer hints consistentes con DISEÑO_INTERFAZ.md (siempre los mismos 4 hints)
 
 ### Fase 3: Módulos Complejos (Semana 5-8)
 - [ ] Módulo NMAP con selección de puertos
