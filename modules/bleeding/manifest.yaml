@@ -1,0 +1,6 @@
+# Identificador, pantalla y metadatos registrados por PluginCatalog.
+id: bleeding
+name: Bleeding
+description: Bluetooth LE / BR-EDR scanning
+icon: bleeding
+version: "0.1.0"

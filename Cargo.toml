@@ -1,0 +1,24 @@
+[package]
+name = "hunterzero-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Graphics library for the GUI
+ggez = "0.8"
+ggez::input = "0.8"
+ggez::graphics = "0.8"
+ggez::event = "0.8"
+
+# SDL2 for KMSDRM/EGL backend on Raspberry Pi
+sdl2 = "2.8"
+sdl2::ttf = "2.8"
+
+# For GPIO on Raspberry Pi (optional, for shutdown button)
+rppal = "1.5"
+
+# Para obtener información del sistema (CPU, memoria, IP)
+sys-infos = "0.1"
+
+# Para embedding Python modules (if keeping Python addons)
+pyembed = "0.4"
