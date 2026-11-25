@@ -1,7 +1,7 @@
 # Identificador, pantalla y metadatos registrados por PluginCatalog.
 id: nmap
 name: Nmap
-description: Escaneo de puertos TCP
+description: Escaneo de puertos TCP con opciones avanzadas - sT, sS, sU, -sV, -O, -A, -F, -T4/T5
 icon: nmap
 version: "0.1.0"
 screen: screen.py

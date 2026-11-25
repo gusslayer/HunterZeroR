@@ -14,11 +14,14 @@ ggez::event = "0.8"
 sdl2 = "2.8"
 sdl2::ttf = "2.8"
 
-# For GPIO on Raspberry Pi (optional, for shutdown button)
+# For GPIO on Raspberry Pi (physical shutdown button on GPIO 26)
 rppal = "1.5"
 
 # Para obtener información del sistema (CPU, memoria, IP)
 sys-infos = "0.1"
 
-# Para embedding Python modules (if keeping Python addons)
+# Python embebido (para módulos que aún no se migran a Rust)
 pyembed = "0.4"
+
+# Para tiempos y procesos
+timeout = "0.2"

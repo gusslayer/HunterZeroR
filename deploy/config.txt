@@ -1,0 +1,17 @@
+# --- Retroflag GPi CASE 2W Configuración unificada ---
+
+# 1. Pantalla (usando superposiciones integradas del sistema)
+dtoverlay=vc4-kms-dpi-generic
+dtparam=hactive=640,hfp=70,hsync=40,hbp=22
+dtparam=vactive=480,vfp=18,vsync=9,vbp=18
+dtparam=clock-frequency=24000000,rgb666-padhi
+dtparam=width-mm=60,height-mm=45
+
+# 2. Apagado seguro (GPIO 26/27)
+# No se usa dtoverlay=gpio-shutdown ni gpio-led: ambos reclamarían las líneas
+# 26/27 y evitarían que hunterzero-poweroff.service las controle. El servicio
+# mantiene GPIO 27 en alto (power enable) y apaga con el botón físico en GPIO 26.
+
+# 3. Audio (primero prueba el PWM predeterminado; si no funciona, cambia a audremap)
+dtparam=audio=on
+audio_pwm_mode=2
