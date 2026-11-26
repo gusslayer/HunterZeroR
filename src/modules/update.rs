@@ -22,8 +22,8 @@ static HELP: &[HelpSection] = &[
     HelpSection {
         heading: "ACTUALIZACION",
         paragraphs: &[
-            "Ejecuta deploy/update.sh con git pull --ff-only.",
-            "Requiere red y repositorio git configurado.",
+            "Ejecuta deploy/update.sh: pull, build, install y restart.",
+            "Muestra salida en vivo; puede tardar varios minutos en Pi Zero.",
         ],
     },
     HelpSection {
@@ -207,7 +207,7 @@ impl ToolScreen for UpdateScreen {
                         None,
                     );
                 }
-                let tip = "Usa git pull --ff-only desde deploy/update.sh.";
+                let tip = "Update: git pull, build release, instala y reinicia el servicio.";
                 for (index, line) in wrap_text(tip, 34).iter().take(2).enumerate() {
                     canvas.draw_text(line, 16, 120 + index as i32 * 12, MUTED_COLOR, 1);
                 }
@@ -216,23 +216,41 @@ impl ToolScreen for UpdateScreen {
             Phase::Running => {
                 let elapsed = self.started_at.elapsed().as_secs();
                 let dots = ".".repeat((elapsed % 4) as usize);
-                canvas.draw_text(&format!("ACTUALIZANDO{dots}"), 16, 36, TEXT_COLOR, 1);
+                canvas.draw_text(&format!("ACTUALIZANDO{dots}"), 16, 44, TEXT_COLOR, 1);
+                canvas.draw_text_clipped(
+                    &format!("{elapsed}s / 180s"),
+                    250,
+                    44,
+                    60,
+                    MUTED_COLOR,
+                    1,
+                );
+
+                let (progress, step) = update_progress(&processes.output, &processes.message);
+                let detail = last_meaningful_line(&processes.output)
+                    .unwrap_or_else(|| processes.message.clone());
+                for (index, line) in wrap_text(&detail, 34).iter().take(2).enumerate() {
+                    canvas.draw_text_clipped(line, 16, 74 + index as i32 * 14, 288, TEXT_COLOR, 1);
+                }
+                canvas.draw_text_clipped(step, 16, 112, 288, MUTED_COLOR, 1);
+
+                let bar_x = 16;
+                let bar_y = 132;
+                let bar_w = 288;
+                let bar_h = 10;
+                canvas.fill_rect(bar_x, bar_y, bar_w, bar_h, MUTED_COLOR);
+                let fill_w = ((bar_w as f32) * progress).round() as i32;
+                if fill_w > 0 {
+                    canvas.fill_rect(bar_x, bar_y, fill_w.clamp(0, bar_w), bar_h, ACCENT_COLOR);
+                }
                 canvas.draw_text(
-                    &format!("Esperando git: {elapsed}s (max. 180s)"),
+                    &format!("{}%", (progress * 100.0).round() as i32),
                     16,
-                    56,
+                    150,
                     ACCENT_COLOR,
                     1,
                 );
-                let lines: Vec<&str> = processes.output.lines().collect();
-                let first = lines.len().saturating_sub(3);
-                for (index, line) in lines[first..].iter().enumerate() {
-                    canvas.draw_text_clipped(line, 16, 76 + index as i32 * 16, 288, TEXT_COLOR, 1);
-                }
-                canvas.fill_rect(15, 145, 290, 7, MUTED_COLOR);
-                let position = 15 + ((self.activity * 70.0) as i32 % 270);
-                canvas.fill_rect(position, 145, 20, 7, ACCENT_COLOR);
-                canvas.draw_text("B CANCELA LA DESCARGA.", 16, 194, ACCENT_COLOR, 1);
+                canvas.draw_text_clipped("B: cancelar", 220, 150, 84, MUTED_COLOR, 1);
             }
             Phase::Result => {
                 let lines = self.result_lines(processes);
@@ -268,4 +286,35 @@ impl ToolScreen for UpdateScreen {
             processes.stop();
         }
     }
+}
+
+fn last_meaningful_line(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .map(|line| line.to_string())
+}
+
+fn update_progress(output: &str, message: &str) -> (f32, &'static str) {
+    let haystack = format!("{output}\n{message}").to_ascii_lowercase();
+    let (progress, step) = if haystack.contains("actualización completa")
+        || haystack.contains("actualizacion completa")
+    {
+        (1.0, "Completado")
+    } else if haystack.contains("reinici") || haystack.contains("instalando binario") {
+        (0.90, "Instalando / reiniciando")
+    } else if haystack.contains("compilando") || haystack.contains("cargo build") {
+        (0.60, "Compilando")
+    } else if haystack.contains("cambios detectados") || haystack.contains("git pull") {
+        (0.30, "Descargando cambios")
+    } else if haystack.contains("actualizando repositorio") {
+        (0.15, "Buscando actualizaciones")
+    } else if haystack.contains("ejecutando") {
+        (0.05, "Iniciando")
+    } else {
+        (0.05, "Preparando")
+    };
+    (progress, step)
 }

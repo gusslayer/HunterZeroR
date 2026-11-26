@@ -2,7 +2,7 @@
 //!
 //! Only `ping`, `nmap` and `nslookup` may be started by a module. The update
 //! flow is a separate, fixed entry point. Output is captured to a file and the
-//! UI reads only the final 4 KiB / 8 lines, exactly like the Python version.
+//! UI reads a bounded tail for display.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -17,8 +17,8 @@ pub const UPDATE_LABEL: &str = "Actualizacion de HunterZero";
 pub const UPDATE_DEPENDENCY_HINT: &str =
     "Si falta una dependencia, ejecuta: sudo bash deploy/deps.sh.";
 pub const MAX_COMMAND_TIMEOUT_SECONDS: u64 = 180;
-const MAX_DISPLAY_OUTPUT: usize = 4096;
-const MAX_DISPLAY_LINES: usize = 8;
+const MAX_DISPLAY_OUTPUT: usize = 8192;
+const MAX_DISPLAY_LINES: usize = 24;
 
 struct RunningCommand {
     label: String,
@@ -321,16 +321,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_tail_is_limited_to_eight_lines() {
+    fn output_tail_is_limited() {
         let path = std::env::temp_dir().join("hz_output_test.log");
-        let content = (1..=20)
+        let content = (1..=40)
             .map(|line| format!("line {line}"))
             .collect::<Vec<_>>()
             .join("\n");
         std::fs::write(&path, content).unwrap_or_default();
         let output = read_output(&path);
-        assert_eq!(output.lines().count(), 8);
-        assert!(output.starts_with("line 13"));
+        assert_eq!(output.lines().count(), 24);
+        assert!(output.starts_with("line 17"));
         let _ = std::fs::remove_file(path);
     }
 
