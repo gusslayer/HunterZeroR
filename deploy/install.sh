@@ -13,7 +13,15 @@ sudo apt-get upgrade -y
 
 # 2. Instalar dependencias del sistema para módulos
 echo "Instalando dependencias del sistema..."
-sudo apt-get install -y nmap dnsutils bluez
+sudo apt-get install -y \
+  git \
+  curl \
+  ca-certificates \
+  build-essential \
+  pkg-config \
+  nmap \
+  dnsutils \
+  bluez
 
 # 3. Configurar config.txt para GPi CASE 2W
 echo "Configurando pantalla GPi CASE 2W..."
@@ -33,9 +41,9 @@ if [ -f "$CONFIG_DST" ]; then
         echo "   - Configuración de pantalla ya presente, omitiendo..."
     else
         # Agregar configuración de pantalla al final del archivo existente
-        echo "" >> "$CONFIG_DST"
-        echo "# Agregado por HunterZero-Rust installer" >> "$CONFIG_DST"
-        cat >> "$CONFIG_DST" << 'EOF'
+        sudo tee -a "$CONFIG_DST" >/dev/null << 'EOF'
+
+# Agregado por HunterZero-Rust installer
 
 # --- Retroflag GPi CASE 2W Configuración unificada ---
 dtoverlay=vc4-kms-dpi-generic
@@ -49,7 +57,20 @@ EOF
 else
     # Crear nuevo archivo config.txt (primera instalación)
     echo "   - Creando nuevo config.txt..."
-    sudo cp "$CONFIG_SRC" "$CONFIG_DST"
+    if [ -f "$CONFIG_SRC" ]; then
+        sudo cp "$CONFIG_SRC" "$CONFIG_DST"
+    else
+        sudo tee "$CONFIG_DST" >/dev/null << 'EOF'
+# HunterZero-Rust - Raspberry Pi Zero W v1.1 + GPi CASE 2W
+
+# --- Retroflag GPi CASE 2W Configuración unificada ---
+dtoverlay=vc4-kms-dpi-generic
+dtparam=hactive=640,hfp=70,hsync=40,hbp=22
+dtparam=vactive=480,vfp=18,vsync=9,vbp=18
+dtparam=clock-frequency=24000000,rgb666-padhi
+dtparam=width-mm=60,height-mm=45
+EOF
+    fi
     echo "   - config.txt creado en $CONFIG_DST"
 fi
 
@@ -73,6 +94,12 @@ fi
 
 # 6. Compilar en modo release
 echo "Compilando aplicación en modo release..."
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "Cargo no encontrado. Instalando Rust (rustup)..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    # shellcheck source=/dev/null
+    . "$HOME/.cargo/env"
+fi
 cd "$APP_DIR"
 cargo build --release
 
