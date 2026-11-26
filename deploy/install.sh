@@ -286,6 +286,7 @@ Description=HunterZero-Rust Application
 After=network.target
 
 [Service]
+ExecStartPre=-/bin/sh -c 'echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null; printf "\033[?25l\033[?1c" > /dev/tty1 2>/dev/null; printf "\033[?25l\033[?1c" > /dev/tty0 2>/dev/null; true'
 ExecStart=${BIN_DST}
 Restart=on-failure
 WorkingDirectory=${APP_DIR}

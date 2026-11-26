@@ -16,6 +16,17 @@ use crate::gfx::Canvas;
 const FBIOBLANK: libc::c_ulong = 0x4611;
 const FB_BLANK_UNBLANK: libc::c_int = 0;
 
+fn hide_console_cursor() {
+    // Oculta el cursor parpadeante del VT para que no se superponga al framebuffer.
+    for path in ["/dev/tty1", "/dev/tty0", "/dev/console"] {
+        if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(path) {
+            let _ = std::io::Write::write_all(&mut file, b"\x1b[?25l\x1b[?1c");
+            let _ = std::io::Write::flush(&mut file);
+        }
+    }
+    let _ = std::fs::write("/sys/class/graphics/fbcon/cursor_blink", b"0");
+}
+
 pub struct FbBackend {
     file: File,
     map: *mut u8,
@@ -89,6 +100,7 @@ impl FbBackend {
             )
         };
 
+        hide_console_cursor();
         let input = EvdevInput::open_all();
         logging::log(&format!(
             "Framebuffer {} {}x{} {}bpp stride {}; {} dispositivos de entrada",
