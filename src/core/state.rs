@@ -1,63 +1,80 @@
-//! State management for HunterZeroR.
-//! 
-//! Mirrors core/state.py from the Python version.
-//! Gestiona el estado UI (menú, módulo en ejecución, resultado) y persiste la selección.
+//! Persisted UI state.
+//!
+//! Only the menu selection is essential. The file is deliberately forgiving: a
+//! corrupt or partially written state file must never prevent the kiosk from
+//! starting.
+
+use std::io;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
-/// Estado de la interfaz de usuario.
-/// 
-/// Igual que `UIState` en Python, pero con serialización JSON para persistencia.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct UIState {
-    /// Índice del módulo seleccionado en el menú
     pub selected: usize,
-    /// Última acción o resultado guardado
-    pub last_action: String,
-    /// Configuración de preferencias del usuario
-    pub preferences: serde_json::Value,
 }
 
 impl UIState {
-    /// Crear un nuevo estado UI.
-    pub fn new() -> Self {
-        Self {
-            selected: 0,
-            last_action: String::new(),
-            preferences: serde_json::json!({}),
-        }
-    }
-
-    /// Cargar el estado desde un archivo JSON.
-    pub fn load_from_file(path: &Path) -> std::io::Result<Self> {
-        if path.exists() {
-            let content = std::fs::read_to_string(path)?;
-            let state: Self = serde_json::from_str(&content)?;
-            Ok(state)
+    /// Load the state or return the default when the file is missing/invalid.
+    pub fn load(path: &Path, module_count: usize) -> Self {
+        let mut state = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<UIState>(&content).ok())
+            .unwrap_or_default();
+        if module_count > 0 {
+            state.selected = state.selected.min(module_count - 1);
         } else {
-            Ok(Self::new())
+            state.selected = 0;
+        }
+        state
+    }
+
+    /// Atomically save the state so a power cut cannot leave a partial file.
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_vec_pretty(self)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, json)?;
+        match std::fs::rename(&temporary, path) {
+            Ok(()) => Ok(()),
+            Err(_) if path.exists() => {
+                // Windows does not replace an existing file with rename().
+                std::fs::remove_file(path)?;
+                std::fs::rename(&temporary, path)
+            }
+            Err(error) => Err(error),
         }
     }
+}
 
-    /// Guardar el estado en un archivo JSON.
-    pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
-        path.parent().map(|p| std::fs::create_dir_all(p)).transpose()?;
-        let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, json)
+/// Default location used by the application.
+pub fn default_state_path(root: &Path) -> PathBuf {
+    root.join("state").join("ui_state.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_index_is_clamped() {
+        let path = std::env::temp_dir().join("hz_state_test.json");
+        std::fs::write(&path, r#"{"selected": 99}"#).unwrap_or_default();
+        let state = UIState::load(&path, 7);
+        assert_eq!(state.selected, 6);
+        let _ = std::fs::remove_file(path);
     }
-}
 
-/// Cargar el estado desde la ruta por defecto.
-/// 
-/// Igual que `UIState(ROOT / "state" / "ui_state.json").load()` en Python.
-pub fn load_default_state(root: &Path) -> std::io::Result<Self> {
-    let path = root.join("state").join("ui_state.json");
-    UIState::load_from_file(&path)
-}
-
-/// Guardar el estado en la ruta por defecto.
-pub fn save_default_state(state: &UIState, root: &Path) -> std::io::Result<()> {
-    let path = root.join("state").join("ui_state.json");
-    state.save_to_file(&path)
+    #[test]
+    fn corrupt_state_falls_back_to_default() {
+        let path = std::env::temp_dir().join("hz_state_corrupt.json");
+        std::fs::write(&path, "{not json").unwrap_or_default();
+        let state = UIState::load(&path, 7);
+        assert_eq!(state.selected, 0);
+        let _ = std::fs::remove_file(path);
+    }
 }
