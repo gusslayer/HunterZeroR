@@ -63,6 +63,8 @@ echo "Configurando apagado GPIO..."
 echo "Configurando directorio de la aplicación..."
 APP_DIR="/opt/hunterzero-rust"
 if [ ! -d "$APP_DIR" ]; then
+    sudo mkdir -p "$APP_DIR"
+    sudo chown "$(id -u):$(id -g)" "$APP_DIR"
     git clone https://github.com/gusslayer/HunterZeroR.git "$APP_DIR"
 else
     cd "$APP_DIR"
