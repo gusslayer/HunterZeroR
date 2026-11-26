@@ -135,7 +135,4 @@ mod tests {
     fn screen_starts_without_a_process() {
         let _ = PingScreen::new();
     }
-
-    #[allow(dead_code)]
-    fn _unused(_: &Path) {}
 }

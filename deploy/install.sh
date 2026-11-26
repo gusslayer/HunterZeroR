@@ -11,14 +11,13 @@ BIN_NAME="hunterzero-rust"
 BIN_DST="/usr/local/bin/${BIN_NAME}"
 CONFIG_DST="/boot/firmware/config.txt"
 CONFIG_SRC="$(dirname "$0")/config.txt"
+SWAP_FILE="/var/swap-hunterzero"
 
 log()  { echo "[HunterZero] $*"; }
 warn() { echo "[HunterZero][WARN] $*" >&2; }
 die()  { echo "[HunterZero][ERROR] $*" >&2; exit 1; }
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
+require_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 as_root() {
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
@@ -28,11 +27,17 @@ as_root() {
   fi
 }
 
-detect_jobs() {
-  local mem_kb=1048576
+mem_total_kb() {
   if [[ -r /proc/meminfo ]]; then
-    mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+    awk '/MemTotal/ {print $2}' /proc/meminfo
+  else
+    echo 1048576
   fi
+}
+
+detect_jobs() {
+  local mem_kb
+  mem_kb="$(mem_total_kb)"
   # Pi Zero W has ~512MB RAM; limit jobs to avoid OOM during rustc/LLVM.
   if [[ "${mem_kb}" -lt 900000 ]]; then
     echo 1
@@ -41,23 +46,70 @@ detect_jobs() {
   fi
 }
 
+ensure_swap_if_low_mem() {
+  local mem_kb
+  mem_kb="$(mem_total_kb)"
+  [[ "${mem_kb}" -lt 900000 ]] || return 0
+
+  if swapon --show 2>/dev/null | grep -q .; then
+    log "Swap ya activo."
+    return 0
+  fi
+
+  if [[ -f "$SWAP_FILE" ]]; then
+    log "Activando swap existente en $SWAP_FILE..."
+    as_root chmod 600 "$SWAP_FILE" || true
+    as_root mkswap "$SWAP_FILE" >/dev/null 2>&1 || true
+    as_root swapon "$SWAP_FILE" || warn "No se pudo activar swap existente."
+    return 0
+  fi
+
+  log "Memoria baja detectada ($((${mem_kb}/1024))MB). Creando swap temporal de 1G para compilar..."
+  if as_root fallocate -l 1G "$SWAP_FILE" 2>/dev/null || as_root dd if=/dev/zero of="$SWAP_FILE" bs=1M count=1024 status=none; then
+    as_root chmod 600 "$SWAP_FILE"
+    as_root mkswap "$SWAP_FILE" >/dev/null
+    as_root swapon "$SWAP_FILE" || warn "No se pudo activar swap; la compilación puede fallar por OOM."
+  else
+    warn "No se pudo crear swap temporal; la compilación puede fallar por OOM."
+  fi
+}
+
+cleanup_temp_swap() {
+  if swapon --show 2>/dev/null | grep -q "$SWAP_FILE"; then
+    log "Desactivando swap temporal..."
+    as_root swapoff "$SWAP_FILE" || true
+  fi
+  if [[ -f "$SWAP_FILE" ]]; then
+    as_root rm -f "$SWAP_FILE" || true
+  fi
+}
+
 ensure_rust() {
+  if ! require_cmd cargo && [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck source=/dev/null
+    . "$HOME/.cargo/env"
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+
   if require_cmd cargo; then
     log "Rust/Cargo detectado: $(cargo --version)"
-    return
+  else
+    log "Cargo no encontrado. Instalando Rust (rustup, profile minimal)..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    # shellcheck source=/dev/null
+    [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+    export PATH="$HOME/.cargo/bin:$PATH"
   fi
 
-  log "Cargo no encontrado. Instalando Rust (rustup, profile minimal)..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  require_cmd cargo || die "Cargo no quedó disponible. Ejecuta: source \"$HOME/.cargo/env\""
+  require_cmd rustc || die "rustc no quedó disponible tras instalar Rust."
 
-  # shellcheck source=/dev/null
-  if [[ -f "$HOME/.cargo/env" ]]; then
-    . "$HOME/.cargo/env"
+  # Asegurar toolchain estable si rustup existe.
+  if require_cmd rustup; then
+    rustup default stable >/dev/null 2>&1 || warn "No se pudo fijar toolchain stable (continuando)."
   fi
-  export PATH="$HOME/.cargo/bin:$PATH"
 
-  require_cmd cargo || die "Cargo no quedó disponible tras instalar rustup. Abre una nueva shell o ejecuta: source \"$HOME/.cargo/env\""
-  log "Rust instalado: $(cargo --version)"
+  log "Toolchain: $(rustc --version) / $(cargo --version)"
 }
 
 write_display_config() {
@@ -124,22 +176,58 @@ ensure_repo() {
   fi
 }
 
+cargo_cmd() {
+  # Ejecuta cargo con variables que reducen presión de memoria en Pi Zero.
+  local jobs="$1"; shift
+  CARGO_BUILD_JOBS="$jobs" cargo "$@" -j "$jobs"
+}
+
 run_tests() {
   if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
     warn "SKIP_TESTS=1: omitiendo pruebas."
-    return
+    return 0
   fi
-  log "Ejecutando pruebas (cargo test)..."
-  cargo test --all-targets
-  log "Pruebas OK."
+
+  local jobs
+  jobs="$(detect_jobs)"
+  log "Ejecutando pruebas (cargo test, jobs=${jobs})..."
+
+  if cargo_cmd "$jobs" test --all-targets; then
+    log "Pruebas OK."
+    return 0
+  fi
+
+  warn "Las pruebas fallaron. Intentando autocorrección: actualizar repo y reintentar una vez..."
+  git -C "$APP_DIR" pull --ff-only || true
+  if cargo_cmd "$jobs" test --all-targets; then
+    log "Pruebas OK tras reintento."
+    return 0
+  fi
+
+  die "Las pruebas fallaron. Revisa el error arriba. Puedes usar SKIP_TESTS=1 para omitir pruebas temporalmente."
 }
 
 build_release() {
   local jobs
   jobs="$(detect_jobs)"
+  ensure_swap_if_low_mem
+
   log "Compilando en modo release (jobs=${jobs})..."
-  # Limitar jobs ayuda a evitar OOM en Pi Zero W.
-  CARGO_BUILD_JOBS="${jobs}" cargo build --release -j "${jobs}"
+  if cargo_cmd "$jobs" build --release; then
+    :
+  else
+    warn "Fallo compilación release. Intentando recuperación automática..."
+    # Recuperación 1: reintentar con menos presión.
+    warn "Reintento 1: build release con -j 1..."
+    if ! CARGO_BUILD_JOBS=1 cargo build --release -j 1; then
+      # Recuperación 2: actualizar código y limpiar artefactos del paquete propio.
+      warn "Reintento 2: git pull --ff-only + cargo clean -p ${BIN_NAME} + build -j 1..."
+      git -C "$APP_DIR" pull --ff-only || true
+      cargo clean -p "$BIN_NAME" || true
+      CARGO_BUILD_JOBS=1 cargo build --release -j 1 || die "Compilación fallida tras reintentos. Revisa errores arriba."
+    fi
+  fi
+
   [[ -f "$APP_DIR/target/release/${BIN_NAME}" ]] || die "No se encontró el binario compilado en target/release/${BIN_NAME}"
   log "Compilación OK."
 }
@@ -174,6 +262,8 @@ EOF
 }
 
 main() {
+  trap cleanup_temp_swap EXIT
+
   log "=== HunterZero-Rust Installation ==="
 
   log "Actualizando índices de paquetes..."
@@ -192,8 +282,6 @@ main() {
     iputils-ping
 
   write_display_config
-
-  # GPIO shutdown note: gpio-shutdown overlay is intentionally not added here.
   log "Apagado GPIO gestionado por hunterzero-poweroff.service (sin dtoverlay=gpio-shutdown)."
 
   ensure_repo
@@ -201,15 +289,13 @@ main() {
 
   cd "$APP_DIR"
 
-  # Make sure cargo env is available in this shell.
+  # Cargar cargo env por si rustup se instaló en esta ejecución.
   if ! require_cmd cargo && [[ -f "$HOME/.cargo/env" ]]; then
     # shellcheck source=/dev/null
     . "$HOME/.cargo/env"
   fi
   export PATH="$HOME/.cargo/bin:$PATH"
   require_cmd cargo || die "cargo no disponible"
-
-  log "Toolchain: $(rustc --version 2>/dev/null || echo desconocido) / $(cargo --version)"
 
   run_tests
   build_release
@@ -226,6 +312,7 @@ main() {
   echo " - Si cambiaste config.txt, el reinicio es necesario para aplicar pantalla."
   echo " - En Pi Zero W la compilación release puede tardar bastante."
   echo " - Para omitir pruebas: SKIP_TESTS=1 sudo -E bash deploy/install.sh"
+  echo " - El instalador reintenta compilación automáticamente y usa swap temporal en equipos con poca RAM."
 }
 
 main "$@"
