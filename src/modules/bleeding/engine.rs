@@ -293,9 +293,6 @@ impl BluetoothEngine {
         if self.is_running() {
             return Err("Ya hay una tarea Bluetooth en curso".to_string());
         }
-        if is_root() {
-            return Err("No ejecutes HunterZero como root.".to_string());
-        }
         let inner = Arc::new(Mutex::new(JobInner {
             kind,
             running: true,
@@ -748,17 +745,6 @@ fn bluetooth_adapter_present() -> bool {
             .unwrap_or(false)
     }
     #[cfg(not(target_os = "linux"))]
-    {
-        false
-    }
-}
-
-fn is_root() -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::geteuid() == 0 }
-    }
-    #[cfg(not(unix))]
     {
         false
     }

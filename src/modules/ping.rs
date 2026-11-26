@@ -44,6 +44,7 @@ impl PingScreen {
                 operation_label: "ENVIAR PING",
                 option_label: "",
                 option_values: &[],
+                option_multi: false,
                 help: HELP,
                 command_builder: build_ping_command,
                 timeout_for: |count| 3 + count as u64 * 2,

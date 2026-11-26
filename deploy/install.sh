@@ -163,6 +163,7 @@ ensure_repo() {
     git clone "$REPO_URL" "$APP_DIR"
   else
     log "Repo existente detectado, actualizando..."
+    git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
     git -C "$APP_DIR" pull --ff-only || warn "No se pudo hacer git pull --ff-only; continuando con el código local"
   fi
 }

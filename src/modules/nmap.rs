@@ -11,7 +11,7 @@ use super::parameterized::{ParameterizedScreen, ToolSpec};
 use super::{Outcome, ToolScreen};
 
 const PORT_COUNTS: &[u32] = &[20, 50, 100];
-const SCRIPT_OPTIONS: &[&str] = &["vuln", "ninguno"];
+const SCRIPT_OPTIONS: &[&str] = &["vuln", "default", "safe"];
 
 static HELP: &[HelpSection] = &[
     HelpSection {
@@ -24,8 +24,8 @@ static HELP: &[HelpSection] = &[
     HelpSection {
         heading: "EJECUTAR",
         paragraphs: &[
-            "Selecciona INICIAR NMAP y confirma con A; B cancela.",
-            "TCP connect lento y scripts NSE vuln; usa solo equipos autorizados.",
+            "En SCRIPTS NSE usa izq/der para elegir y A para marcar/desmarcar.",
+            "Puedes concatenar scripts; usa solo equipos autorizados.",
         ],
     },
 ];
@@ -45,6 +45,7 @@ impl NmapScreen {
                 operation_label: "INICIAR NMAP",
                 option_label: "SCRIPTS NSE",
                 option_values: SCRIPT_OPTIONS,
+                option_multi: true,
                 help: HELP,
                 command_builder: build_nmap_command,
                 timeout_for: |_| MAX_COMMAND_TIMEOUT_SECONDS,
@@ -81,7 +82,7 @@ impl ToolScreen for NmapScreen {
     }
 }
 
-/// Build a slow, unprivileged TCP-connect scan with the chosen NSE scripts.
+/// Build a slow, unprivileged TCP-connect scan with selected NSE scripts.
 pub fn build_nmap_command(
     target: &str,
     port_count: u32,
@@ -104,12 +105,23 @@ pub fn build_nmap_command(
         "--host-timeout".to_string(),
         "90s".to_string(),
     ];
-    if script == Some("ninguno") {
-        command.push(address);
-        return Ok(command);
+
+    let scripts: Vec<String> = script
+        .unwrap_or("ninguno")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "ninguno")
+        .map(|s| s.to_string())
+        .collect();
+    if !scripts.is_empty() {
+        for s in &scripts {
+            if !SCRIPT_OPTIONS.contains(&s.as_str()) {
+                return Err(format!("Script NSE no permitido: {s}"));
+            }
+        }
+        command.push("--script".to_string());
+        command.push(scripts.join(","));
     }
-    command.push("--script".to_string());
-    command.push("vuln".to_string());
     command.push(address);
     Ok(command)
 }

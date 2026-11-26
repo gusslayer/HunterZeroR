@@ -258,12 +258,17 @@ impl ToolScreen for UpdateScreen {
                 for (position, index) in
                     (self.result_view.first()..self.result_view.last()).enumerate()
                 {
-                    let color = if index == 0 { ACCENT_COLOR } else { TEXT_COLOR };
-                    canvas.draw_text(
+                    let y = RESULT_TOP + position as i32 * RESULT_ROW;
+                    let selected = index == self.result_view.selected;
+                    if selected {
+                        canvas.fill_rect(12, y - 1, 296, RESULT_ROW, SELECTED_BG);
+                    }
+                    canvas.draw_text_clipped(
                         &lines[index],
                         16,
-                        RESULT_TOP + position as i32 * RESULT_ROW,
-                        color,
+                        y,
+                        288,
+                        if selected { ACCENT_COLOR } else { TEXT_COLOR },
                         1,
                     );
                 }

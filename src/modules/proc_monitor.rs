@@ -128,11 +128,16 @@ impl ToolScreen for ProcMonitorScreen {
                 snapshot.memory_percent,
                 truncate_chars(&snapshot.elapsed, 4)
             );
+            let y = LIST_TOP + position as i32 * ROW_HEIGHT;
+            let selected = index == self.list_view.selected;
+            if selected {
+                canvas.fill_rect(12, y - 1, 296, ROW_HEIGHT, SELECTED_BG);
+            }
             canvas.draw_text(
                 &line,
                 16,
-                LIST_TOP + position as i32 * ROW_HEIGHT,
-                TEXT_COLOR,
+                y,
+                if selected { ACCENT_COLOR } else { TEXT_COLOR },
                 1,
             );
         }

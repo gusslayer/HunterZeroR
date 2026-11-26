@@ -8,6 +8,7 @@ log()  { echo "[HunterZero] $*"; }
 warn() { echo "[HunterZero][WARN] $*" >&2; }
 
 log "Actualizando repositorio..."
+git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
 git pull --ff-only
 AFTER="$(git rev-parse HEAD 2>/dev/null || echo none)"

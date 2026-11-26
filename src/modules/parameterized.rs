@@ -7,8 +7,8 @@ use crate::core::input::Action;
 use crate::core::process_manager::ProcessManager;
 use crate::core::system_stats::SystemStats;
 use crate::core::ui::{
-    draw_frame, draw_help, draw_row, help_capacity, EditResult, HelpSection, Ipv4Editor,
-    ScrollState,
+    draw_chevron, draw_frame, draw_help, draw_row, help_capacity, EditResult, HelpSection,
+    Ipv4Editor, ScrollState,
 };
 use crate::gfx::{wrap_text, Canvas};
 use crate::theme::*;
@@ -33,6 +33,7 @@ pub struct ToolSpec {
     pub operation_label: &'static str,
     pub option_label: &'static str,
     pub option_values: &'static [&'static str],
+    pub option_multi: bool,
     pub help: &'static [HelpSection],
     pub command_builder: fn(&str, u32, Option<&str>) -> Result<Vec<String>, String>,
     pub timeout_for: fn(u32) -> u64,
@@ -44,6 +45,7 @@ pub struct ParameterizedScreen {
     target: Ipv4Editor,
     parameter: u32,
     option: usize,
+    option_toggles: Vec<bool>,
     phase: Phase,
     selected: usize,
     help_scroll: ScrollState,
@@ -62,23 +64,43 @@ impl ParameterizedScreen {
         } else {
             spec.parameter_values.first().copied().unwrap_or(0)
         };
+        let option_toggles = if spec.option_multi {
+            vec![false; spec.option_values.len()]
+        } else {
+            Vec::new()
+        };
         Self {
             spec,
             rows,
             target: Ipv4Editor::new("192.168.1.1"),
             parameter,
             option: 0,
+            option_toggles,
             phase: Phase::Settings,
             selected: 0,
             help_scroll: ScrollState::new(help_capacity()),
         }
     }
 
-    fn option_value(&self) -> Option<&'static str> {
+    fn option_value(&self) -> Option<String> {
         if self.spec.option_values.is_empty() {
-            None
+            return None;
+        }
+        if self.spec.option_multi {
+            let selected: Vec<&str> = self
+                .spec
+                .option_values
+                .iter()
+                .zip(self.option_toggles.iter())
+                .filter_map(|(name, on)| if *on { Some(*name) } else { None })
+                .collect();
+            if selected.is_empty() {
+                Some("ninguno".to_string())
+            } else {
+                Some(selected.join(","))
+            }
         } else {
-            self.spec.option_values.get(self.option).copied()
+            self.spec.option_values.get(self.option).map(|v| (*v).to_string())
         }
     }
 
@@ -124,6 +146,10 @@ impl ParameterizedScreen {
                 if self.selected == 0 {
                     self.target.begin();
                     self.phase = Phase::EditTarget;
+                } else if option_row == Some(self.selected) && self.spec.option_multi {
+                    if let Some(slot) = self.option_toggles.get_mut(self.option) {
+                        *slot = !*slot;
+                    }
                 } else if self.selected == 2 {
                     if action == Action::Start {
                         self.start_command(processes);
@@ -144,15 +170,19 @@ impl ParameterizedScreen {
 
     fn start_command(&mut self, processes: &mut ProcessManager) {
         let address = self.target.address();
-        let command =
-            match (self.spec.command_builder)(&address, self.parameter, self.option_value()) {
-                Ok(command) => command,
-                Err(error) => {
-                    processes.message = error;
-                    self.phase = Phase::Result;
-                    return;
-                }
-            };
+        let option = self.option_value();
+        let command = match (self.spec.command_builder)(
+            &address,
+            self.parameter,
+            option.as_deref(),
+        ) {
+            Ok(command) => command,
+            Err(error) => {
+                processes.message = error;
+                self.phase = Phase::Result;
+                return;
+            }
+        };
         let label = format!("{} {}", self.spec.operation_label, address);
         let timeout = (self.spec.timeout_for)(self.parameter);
         if processes.start_command(&label, &command, timeout) {
@@ -245,32 +275,87 @@ impl ToolScreen for ParameterizedScreen {
         );
         match self.phase {
             Phase::Settings => {
+                let option_display = if self.spec.option_multi {
+                    self.spec
+                        .option_values
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| {
+                            let on = self.option_toggles.get(i).copied().unwrap_or(false);
+                            let mark = if on { "x" } else { " " };
+                            let focus = if i == self.option { ">" } else { " " };
+                            format!("{focus}[{mark}]{}", name)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else {
+                    self.option_value().unwrap_or_default()
+                };
                 let values = [
                     self.target.address(),
                     self.parameter.to_string(),
-                    self.option_value().unwrap_or("").to_string(),
+                    option_display,
                 ];
                 for (index, label) in self.rows.iter().enumerate() {
-                    let value = match index {
-                        0 => values[0].as_str(),
-                        1 => values[1].as_str(),
-                        2 => "",
-                        _ if !self.spec.option_values.is_empty() && index == 3 => {
-                            values[2].as_str()
+                    let y = 32 + index as i32 * 19;
+                    let is_multi_option =
+                        self.spec.option_multi && !self.spec.option_values.is_empty() && index == 3;
+                    if is_multi_option {
+                        let selected = index == self.selected;
+                        if selected {
+                            canvas.fill_rect(12, y, 296, 17, SELECTED_BG);
+                            canvas.stroke_rect(12, y, 296, 17, ACCENT_COLOR);
+                            canvas.fill_rect(12, y, 3, 17, ACCENT_COLOR);
                         }
-                        _ => "",
-                    };
-                    draw_row(
-                        canvas,
-                        12,
-                        32 + index as i32 * 19,
-                        296,
-                        17,
-                        label,
-                        value,
-                        index == self.selected,
-                        None,
-                    );
+                        canvas.draw_text_clipped(
+                            &crate::core::font::plain_text(label).to_ascii_uppercase(),
+                            19,
+                            y + 4,
+                            90,
+                            TEXT_COLOR,
+                            1,
+                        );
+                        let mut x = 114;
+                        for (i, name) in self.spec.option_values.iter().enumerate() {
+                            let on = self.option_toggles.get(i).copied().unwrap_or(false);
+                            let focused = i == self.option;
+                            let marker = if on { "[X]" } else { "[ ]" };
+                            let color = if focused && selected {
+                                ACCENT_COLOR
+                            } else if on {
+                                TEXT_COLOR
+                            } else {
+                                MUTED_COLOR
+                            };
+                            let item = format!("{marker}{name}");
+                            canvas.draw_text_clipped(&item, x, y + 4, 60, color, 1);
+                            x += crate::core::font::text_width(&item, 1) + 4;
+                        }
+                        if selected {
+                            draw_chevron(canvas, 295, y + 3, 9, 11, ACCENT_COLOR);
+                        }
+                    } else {
+                        let value = match index {
+                            0 => values[0].as_str(),
+                            1 => values[1].as_str(),
+                            2 => "",
+                            _ if !self.spec.option_values.is_empty() && index == 3 => {
+                                values[2].as_str()
+                            }
+                            _ => "",
+                        };
+                        draw_row(
+                            canvas,
+                            12,
+                            y,
+                            296,
+                            17,
+                            label,
+                            value,
+                            index == self.selected,
+                            None,
+                        );
+                    }
                 }
                 draw_frame(canvas, 10, 150, 300, 59, GRID_COLOR, Some(PANEL_COLOR));
                 canvas.draw_text("AYUDA RAPIDA", 16, 154, ACCENT_COLOR, 1);
