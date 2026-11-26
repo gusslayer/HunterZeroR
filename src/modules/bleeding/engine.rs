@@ -588,8 +588,8 @@ pub fn parse_info_services(output: &str) -> Vec<Service> {
         let rest = rest.trim();
         let (uuid, name) = match (rest.find('('), rest.rfind(')')) {
             (Some(open), Some(close)) if close > open => (
-                rest[..open].trim().to_string(),
                 rest[open + 1..close].trim().to_string(),
+                rest[..open].trim().to_string(),
             ),
             _ => (rest.to_string(), "SERVICIO".to_string()),
         };

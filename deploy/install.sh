@@ -38,7 +38,6 @@ mem_total_kb() {
 detect_jobs() {
   local mem_kb
   mem_kb="$(mem_total_kb)"
-  # Pi Zero W has ~512MB RAM; limit jobs to avoid OOM during rustc/LLVM.
   if [[ "${mem_kb}" -lt 900000 ]]; then
     echo 1
   else
@@ -55,7 +54,6 @@ ensure_swap_if_low_mem() {
     log "Swap ya activo."
     return 0
   fi
-
   if [[ -f "$SWAP_FILE" ]]; then
     log "Activando swap existente en $SWAP_FILE..."
     as_root chmod 600 "$SWAP_FILE" || true
@@ -79,9 +77,7 @@ cleanup_temp_swap() {
     log "Desactivando swap temporal..."
     as_root swapoff "$SWAP_FILE" || true
   fi
-  if [[ -f "$SWAP_FILE" ]]; then
-    as_root rm -f "$SWAP_FILE" || true
-  fi
+  [[ -f "$SWAP_FILE" ]] && as_root rm -f "$SWAP_FILE" || true
 }
 
 ensure_rust() {
@@ -103,20 +99,15 @@ ensure_rust() {
 
   require_cmd cargo || die "Cargo no quedó disponible. Ejecuta: source \"$HOME/.cargo/env\""
   require_cmd rustc || die "rustc no quedó disponible tras instalar Rust."
-
-  # Asegurar toolchain estable si rustup existe.
   if require_cmd rustup; then
     rustup default stable >/dev/null 2>&1 || warn "No se pudo fijar toolchain stable (continuando)."
   fi
-
   log "Toolchain: $(rustc --version) / $(cargo --version)"
 }
 
 write_display_config() {
   log "Configurando pantalla GPi CASE 2W..."
-  local config_backup
-  config_backup="/boot/firmware/config.txt.backup.$(date +%Y%m%d%H%M%S)"
-
+  local config_backup="/boot/firmware/config.txt.backup.$(date +%Y%m%d%H%M%S)"
   local block
   block=$(cat <<'EOF'
 
@@ -176,10 +167,40 @@ ensure_repo() {
   fi
 }
 
-cargo_cmd() {
-  # Ejecuta cargo con variables que reducen presión de memoria en Pi Zero.
+cargo_with_jobs() {
   local jobs="$1"; shift
   CARGO_BUILD_JOBS="$jobs" cargo "$@" -j "$jobs"
+}
+
+run_preflight_checks() {
+  local jobs
+  jobs="$(detect_jobs)"
+  log "Preflight: verificando código antes de compilar release..."
+
+  # Comprobación rápida de compilación (debug/check) para detectar errores temprano.
+  if cargo_with_jobs "$jobs" check --all-targets; then
+    log "Preflight check OK."
+  else
+    warn "cargo check falló. Intentando autocorrección (git pull --ff-only) y reintento..."
+    git -C "$APP_DIR" pull --ff-only || true
+    cargo_with_jobs "$jobs" check --all-targets || die "El código no compila (cargo check). Corrige los errores antes de continuar."
+    log "Preflight check OK tras reintento."
+  fi
+
+  # Gates opcionales si las herramientas están instaladas.
+  if require_cmd rustfmt || rustup component list --installed 2>/dev/null | grep -q rustfmt; then
+    log "Preflight: cargo fmt --check..."
+    cargo fmt --all -- --check || warn "Formato no cumple cargo fmt (no bloqueante en Pi, pero conviene corregirlo)."
+  else
+    warn "rustfmt no instalado; omitiendo cargo fmt --check."
+  fi
+
+  if rustup component list --installed 2>/dev/null | grep -q clippy; then
+    log "Preflight: cargo clippy..."
+    cargo_with_jobs "$jobs" clippy --all-targets -- -D warnings || warn "Clippy reportó warnings/errores (no bloqueante en instalador automático)."
+  else
+    warn "clippy no instalado; omitiendo cargo clippy."
+  fi
 }
 
 run_tests() {
@@ -191,20 +212,19 @@ run_tests() {
   local jobs
   jobs="$(detect_jobs)"
   log "Ejecutando pruebas (cargo test, jobs=${jobs})..."
-
-  if cargo_cmd "$jobs" test --all-targets; then
+  if cargo_with_jobs "$jobs" test --all-targets; then
     log "Pruebas OK."
     return 0
   fi
 
-  warn "Las pruebas fallaron. Intentando autocorrección: actualizar repo y reintentar una vez..."
+  warn "Las pruebas fallaron. Intentando autocorrección: git pull --ff-only y reintento..."
   git -C "$APP_DIR" pull --ff-only || true
-  if cargo_cmd "$jobs" test --all-targets; then
+  if cargo_with_jobs "$jobs" test --all-targets; then
     log "Pruebas OK tras reintento."
     return 0
   fi
 
-  die "Las pruebas fallaron. Revisa el error arriba. Puedes usar SKIP_TESTS=1 para omitir pruebas temporalmente."
+  die "Las pruebas fallaron. Revisa el error arriba. Usa SKIP_TESTS=1 para omitir temporalmente si estás depurando."
 }
 
 build_release() {
@@ -213,14 +233,12 @@ build_release() {
   ensure_swap_if_low_mem
 
   log "Compilando en modo release (jobs=${jobs})..."
-  if cargo_cmd "$jobs" build --release; then
+  if cargo_with_jobs "$jobs" build --release; then
     :
   else
     warn "Fallo compilación release. Intentando recuperación automática..."
-    # Recuperación 1: reintentar con menos presión.
     warn "Reintento 1: build release con -j 1..."
     if ! CARGO_BUILD_JOBS=1 cargo build --release -j 1; then
-      # Recuperación 2: actualizar código y limpiar artefactos del paquete propio.
       warn "Reintento 2: git pull --ff-only + cargo clean -p ${BIN_NAME} + build -j 1..."
       git -C "$APP_DIR" pull --ff-only || true
       cargo clean -p "$BIN_NAME" || true
@@ -228,8 +246,27 @@ build_release() {
     fi
   fi
 
-  [[ -f "$APP_DIR/target/release/${BIN_NAME}" ]] || die "No se encontró el binario compilado en target/release/${BIN_NAME}"
-  log "Compilación OK."
+  local built_bin="$APP_DIR/target/release/${BIN_NAME}"
+  [[ -f "$built_bin" ]] || die "No se encontró el binario compilado en $built_bin"
+  [[ -s "$built_bin" ]] || die "El binario compilado está vacío: $built_bin"
+  log "Compilación OK: $built_bin"
+}
+
+verify_binary() {
+  local bin="$1"
+  log "Verificando binario instalado..."
+  [[ -f "$bin" ]] || die "Binario no encontrado: $bin"
+  [[ -x "$bin" ]] || die "Binario no ejecutable: $bin"
+  # Verificación ligera: en Linux, comprobar que es ELF ejecutable si file está disponible.
+  if require_cmd file; then
+    local info
+    info="$(file -b "$bin" || true)"
+    log "file: $info"
+    if [[ "$info" != *"ELF"* ]] && [[ "$info" != *"executable"* ]]; then
+      warn "El binario no parece ELF ejecutable según 'file': $info"
+    fi
+  fi
+  log "Verificación de binario OK."
 }
 
 install_binary() {
@@ -237,6 +274,7 @@ install_binary() {
   as_root systemctl stop "$SERVICE_NAME" 2>/dev/null || true
   as_root cp "$APP_DIR/target/release/${BIN_NAME}" "$BIN_DST"
   as_root chmod +x "$BIN_DST"
+  verify_binary "$BIN_DST"
   log "Binario instalado en $BIN_DST"
 }
 
@@ -276,6 +314,7 @@ main() {
     ca-certificates \
     build-essential \
     pkg-config \
+    file \
     nmap \
     dnsutils \
     bluez \
@@ -288,8 +327,6 @@ main() {
   ensure_rust
 
   cd "$APP_DIR"
-
-  # Cargar cargo env por si rustup se instaló en esta ejecución.
   if ! require_cmd cargo && [[ -f "$HOME/.cargo/env" ]]; then
     # shellcheck source=/dev/null
     . "$HOME/.cargo/env"
@@ -297,6 +334,7 @@ main() {
   export PATH="$HOME/.cargo/bin:$PATH"
   require_cmd cargo || die "cargo no disponible"
 
+  run_preflight_checks
   run_tests
   build_release
   install_binary
@@ -304,6 +342,7 @@ main() {
 
   echo ""
   log "=== Instalación Completa ==="
+  log "Verificaciones: preflight OK, pruebas OK (o SKIP_TESTS=1), build release OK, binario verificado."
   echo "1. Reinicia la Raspberry Pi: sudo reboot"
   echo "2. Verificar estado: systemctl status ${SERVICE_NAME}"
   echo "3. Ver logs: journalctl -u ${SERVICE_NAME} -f"
@@ -312,7 +351,7 @@ main() {
   echo " - Si cambiaste config.txt, el reinicio es necesario para aplicar pantalla."
   echo " - En Pi Zero W la compilación release puede tardar bastante."
   echo " - Para omitir pruebas: SKIP_TESTS=1 sudo -E bash deploy/install.sh"
-  echo " - El instalador reintenta compilación automáticamente y usa swap temporal en equipos con poca RAM."
+  echo " - El instalador reintenta automáticamente ante fallos comunes y usa swap temporal en poca RAM."
 }
 
 main "$@"

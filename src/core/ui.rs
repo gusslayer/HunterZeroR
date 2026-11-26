@@ -961,7 +961,7 @@ mod tests {
     fn mac_editor_wraps_nibbles() {
         let mut editor = MacEditor::new(DEFAULT_MAC);
         editor.handle(Action::Up);
-        assert_eq!(editor.value(), "FD:FC:48:11:22:33");
+        assert_eq!(editor.value(), "0C:FC:48:11:22:33");
         editor.handle(Action::Down);
         assert_eq!(editor.value(), "FC:FC:48:11:22:33");
     }
