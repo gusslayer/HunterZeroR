@@ -153,6 +153,7 @@ EOF
 
 ensure_repo() {
   log "Configurando directorio de la aplicación..."
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   if [[ ! -d "$APP_DIR/.git" ]]; then
     if [[ -d "$APP_DIR" ]] && [[ -n "$(ls -A "$APP_DIR" 2>/dev/null || true)" ]]; then
       warn "$APP_DIR existe pero no es un repo git. Respaldando..."
