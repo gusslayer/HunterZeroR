@@ -315,6 +315,7 @@ main() {
     build-essential \
     pkg-config \
     file \
+    evtest \
     nmap \
     dnsutils \
     bluez \

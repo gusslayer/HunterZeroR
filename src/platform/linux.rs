@@ -242,6 +242,9 @@ struct InputEvent {
 }
 
 const EV_KEY: u16 = 1;
+const EV_ABS: u16 = 3;
+const ABS_HAT0X: u16 = 16;
+const ABS_HAT0Y: u16 = 17;
 const KEY_ESC: u16 = 1;
 const KEY_BACKSPACE: u16 = 14;
 const KEY_TAB: u16 = 15;
@@ -258,7 +261,8 @@ const KEY_RIGHT: u16 = 106;
 const KEY_DOWN: u16 = 108;
 const BTN_A: u16 = 304;
 const BTN_B: u16 = 305;
-const BTN_NORTH: u16 = 308;
+const BTN_NORTH: u16 = 307;
+const BTN_WEST: u16 = 308;
 const BTN_START: u16 = 315;
 const BTN_MODE: u16 = 316;
 const BTN_DPAD_UP: u16 = 544;
@@ -316,21 +320,27 @@ impl EvdevInput {
                             let event = unsafe {
                                 std::ptr::read_unaligned(chunk.as_ptr() as *const InputEvent)
                             };
-                            if event.type_ != EV_KEY || event.value != 1 {
-                                if event.type_ == EV_KEY
-                                    && event.value == 0
-                                    && (event.code == KEY_LEFTCTRL || event.code == KEY_RIGHTCTRL)
-                                {
-                                    self.ctrl = false;
+                            if event.type_ == EV_KEY {
+                                if event.value != 1 {
+                                    if event.value == 0
+                                        && (event.code == KEY_LEFTCTRL
+                                            || event.code == KEY_RIGHTCTRL)
+                                    {
+                                        self.ctrl = false;
+                                    }
+                                    continue;
                                 }
-                                continue;
-                            }
-                            if event.code == KEY_LEFTCTRL || event.code == KEY_RIGHTCTRL {
-                                self.ctrl = true;
-                                continue;
-                            }
-                            if let Some(action) = key_action(event.code, self.ctrl) {
-                                actions.push(action);
+                                if event.code == KEY_LEFTCTRL || event.code == KEY_RIGHTCTRL {
+                                    self.ctrl = true;
+                                    continue;
+                                }
+                                if let Some(action) = key_action(event.code, self.ctrl) {
+                                    actions.push(action);
+                                }
+                            } else if event.type_ == EV_ABS {
+                                if let Some(action) = hat_action(event.code, event.value) {
+                                    actions.push(action);
+                                }
                             }
                         }
                     }
@@ -354,6 +364,16 @@ fn key_action(code: u16, ctrl: bool) -> Option<Action> {
         KEY_TAB | BTN_START | BTN_MODE => Some(Action::Start),
         KEY_F10 => Some(Action::Quit),
         KEY_Q if ctrl => Some(Action::Quit),
+        _ => None,
+    }
+}
+
+fn hat_action(code: u16, value: i32) -> Option<Action> {
+    match (code, value) {
+        (ABS_HAT0Y, -1) => Some(Action::Up),
+        (ABS_HAT0Y, 1) => Some(Action::Down),
+        (ABS_HAT0X, -1) => Some(Action::Left),
+        (ABS_HAT0X, 1) => Some(Action::Right),
         _ => None,
     }
 }
