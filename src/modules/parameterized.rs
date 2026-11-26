@@ -90,7 +90,7 @@ impl ParameterizedScreen {
         self.rows.len() - 1
     }
 
-    fn handle_settings(&mut self, action: Action) -> Outcome {
+    fn handle_settings(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         let option_row = if self.spec.option_values.is_empty() {
             None
         } else {
@@ -217,7 +217,7 @@ impl ToolScreen for ParameterizedScreen {
                 Action::Back => Outcome::Close,
                 _ => Outcome::Stay,
             },
-            Phase::Settings => self.handle_settings(action),
+            Phase::Settings => self.handle_settings(action, processes),
         }
     }
 

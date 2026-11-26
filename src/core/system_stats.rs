@@ -5,7 +5,6 @@
 //! (development only) `sysinfo` provides the same fields where the operating
 //! system exposes them; missing sensors are reported as `None`, never invented.
 
-use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 

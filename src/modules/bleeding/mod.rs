@@ -10,7 +10,9 @@ use crate::core::ui::{
 use crate::gfx::{wrap_text, Canvas};
 use crate::theme::*;
 
-use super::engine::{
+mod engine;
+
+use engine::{
     port_for_protocol, BluetoothEngine, Device, Kind, Mode, Service, ATTACK_DURATIONS,
     PACKET_SIZES, PROTOCOLS, THREAD_COUNTS,
 };
@@ -192,8 +194,8 @@ impl BleedingScreen {
             self.result_message.clone()
         };
         let mut lines = wrap_text(&base, 34);
-        for event in state.events {
-            lines.extend(wrap_text(&event, 34));
+        for event in &state.events {
+            lines.extend(wrap_text(event, 34));
         }
         lines
     }

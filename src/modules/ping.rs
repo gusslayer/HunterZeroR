@@ -1,7 +1,5 @@
 //! Ping module: manually addressed ICMP Echo requests.
 
-use std::path::Path;
-
 use crate::core::input::Action;
 use crate::core::process_manager::ProcessManager;
 use crate::core::system_stats::SystemStats;

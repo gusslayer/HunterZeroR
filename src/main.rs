@@ -22,7 +22,7 @@ use crate::gfx::Canvas;
 use crate::modules::{Outcome, ToolScreen};
 use crate::theme::{
     ACCENT_COLOR, BG_COLOR, CONTENT_BOTTOM, CONTENT_HEIGHT, CONTENT_TOP, ERROR_COLOR, FPS,
-    MUTED_COLOR, SCREEN_WIDTH,
+    MUTED_COLOR, SCREEN_HEIGHT, SCREEN_WIDTH,
 };
 
 const MENU_ROW_HEIGHT: i32 = 19;

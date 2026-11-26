@@ -67,7 +67,7 @@ impl NsLookupScreen {
         }
     }
 
-    fn handle_settings(&mut self, action: Action) -> Outcome {
+    fn handle_settings(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match action {
             Action::Up => {
                 self.selected = (self.selected + self.rows.len() - 1) % self.rows.len();
@@ -183,7 +183,7 @@ impl ToolScreen for NsLookupScreen {
                 Action::Back => Outcome::Close,
                 _ => Outcome::Stay,
             },
-            Phase::Settings => self.handle_settings(action),
+            Phase::Settings => self.handle_settings(action, processes),
         }
     }
 
