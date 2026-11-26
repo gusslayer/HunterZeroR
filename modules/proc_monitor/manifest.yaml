@@ -1,6 +1,0 @@
-# Identificador, pantalla y metadatos registrados por PluginCatalog.
-id: proc_monitor
-name: Proc Monitor
-description: Lista de procesos activos
-icon: terminal
-version: "0.1.0"

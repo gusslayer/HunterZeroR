@@ -1,6 +1,0 @@
-# Identificador, pantalla y metadatos registrados por PluginCatalog.
-id: nslookup
-name: Nslookup
-description: Resolución DNS interactiva
-icon: nslookup
-version: "0.1.0"

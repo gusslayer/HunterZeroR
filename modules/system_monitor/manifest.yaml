@@ -1,6 +1,0 @@
-# Identificador, pantalla y metadatos registrados por PluginCatalog.
-id: system_monitor
-name: System Monitor
-description: Métricas CPU, Memoria, Temperatura
-icon: system
-version: "0.1.0"
