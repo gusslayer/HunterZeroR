@@ -187,7 +187,7 @@ struct IconBitmap {
 
 fn icon_cache() -> &'static OnceLock<HashMap<String, IconBitmap>> {
     static CACHE: OnceLock<HashMap<String, IconBitmap>> = OnceLock::new();
-    CACHE
+    &CACHE
 }
 
 fn icon_path(name: &str) -> Option<std::path::PathBuf> {
