@@ -8,6 +8,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::core::input::{Action, Debouncer};
 use crate::core::logging;
@@ -283,32 +284,42 @@ const BTN_DPAD_LEFT: u16 = 546;
 const BTN_DPAD_RIGHT: u16 = 547;
 
 struct EvdevInput {
-    devices: Vec<File>,
+    devices: Vec<(PathBuf, File)>,
     ctrl: bool,
+    last_scan: Instant,
 }
 
 impl EvdevInput {
     fn open_all() -> Self {
-        let mut devices = Vec::new();
+        let mut input = Self {
+            devices: Vec::new(),
+            ctrl: false,
+            last_scan: Instant::now(),
+        };
+        input.rescan();
+        if input.devices.is_empty() {
+            logging::log(
+                "No se pudo abrir ningun /dev/input/event*; la interfaz funcionara sin botones fisicos.",
+            );
+        }
+        input
+    }
+
+    fn rescan(&mut self) {
+        self.last_scan = Instant::now();
         for index in 0..32 {
-            let path = format!("/dev/input/event{index}");
+            let path = PathBuf::from(format!("/dev/input/event{index}"));
+            if self.devices.iter().any(|(p, _)| p == &path) {
+                continue;
+            }
             match OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NONBLOCK)
                 .open(&path)
             {
-                Ok(file) => devices.push(file),
+                Ok(file) => self.devices.push((path, file)),
                 Err(_) => continue,
             }
-        }
-        if devices.is_empty() {
-            logging::log(
-                "No se pudo abrir ningun /dev/input/event*; la interfaz funcionara sin botones fisicos.",
-            );
-        }
-        Self {
-            devices,
-            ctrl: false,
         }
     }
 
@@ -317,16 +328,25 @@ impl EvdevInput {
     }
 
     fn poll(&mut self) -> Vec<Action> {
+        if self.last_scan.elapsed().as_secs() >= 3 {
+            self.rescan();
+        }
+
         let mut actions = Vec::new();
         let event_size = std::mem::size_of::<InputEvent>();
         if event_size == 0 || event_size > 32 {
             return actions;
         }
         let mut buffer = [0u8; 32 * 64];
-        for device in &mut self.devices {
+        let mut dead = Vec::new();
+
+        for (idx, (_path, device)) in self.devices.iter_mut().enumerate() {
             loop {
                 match device.read(&mut buffer) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        dead.push(idx);
+                        break;
+                    }
                     Ok(read) => {
                         for chunk in buffer[..read].chunks_exact(event_size) {
                             let event = unsafe {
@@ -357,10 +377,24 @@ impl EvdevInput {
                         }
                     }
                     Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                    Err(_) => break,
+                    Err(_) => {
+                        dead.push(idx);
+                        break;
+                    }
                 }
             }
         }
+
+        if !dead.is_empty() {
+            dead.sort_unstable();
+            dead.dedup();
+            for idx in dead.into_iter().rev() {
+                if idx < self.devices.len() {
+                    self.devices.remove(idx);
+                }
+            }
+        }
+
         actions
     }
 }

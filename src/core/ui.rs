@@ -1,5 +1,8 @@
 //! Shared pixel-art widgets, scrolling state, help view, and D-pad editors.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use crate::core::font;
 use crate::core::input::Action;
 use crate::core::system_stats::SystemStats;
@@ -79,25 +82,27 @@ pub fn draw_row(
         text_x = x + 24;
     }
     let label = font::plain_text(label).to_ascii_uppercase();
-    canvas.draw_text_clipped(
-        &label,
-        text_x,
-        text_y,
-        width - (text_x - x) - 22,
-        TEXT_COLOR,
-        1,
-    );
-    if !value.is_empty() {
+    let value_text = if value.is_empty() {
+        String::new()
+    } else {
         let value = font::plain_text(value).to_ascii_uppercase();
-        let value = if value.chars().count() > 12 {
+        if value.chars().count() > 12 {
             value.chars().take(12).collect::<String>()
         } else {
             value
-        };
-        let value_width = font::text_width(&value, 1);
-        let right_margin = if selected { 20 } else { 10 };
+        }
+    };
+    let value_width = if value_text.is_empty() {
+        0
+    } else {
+        font::text_width(&value_text, 1)
+    };
+    let right_margin = if selected { 20 } else { 10 };
+    let label_max_w = (width - (text_x - x) - right_margin - value_width - 6).max(0);
+    canvas.draw_text_clipped(&label, text_x, text_y, label_max_w, TEXT_COLOR, 1);
+    if !value_text.is_empty() {
         canvas.draw_text(
-            &value,
+            &value_text,
             x + width - right_margin - value_width,
             text_y,
             ACCENT_COLOR,
@@ -173,93 +178,126 @@ pub fn draw_meter(
     }
 }
 
-/// Simple 14x14 glyphs for the HUD and menu. The repository ships SVG icons,
-/// but the Pi build has no SVG rasteriser; these vector-ish primitives give the
-/// same silhouettes without a runtime dependency.
-pub fn draw_icon(canvas: &mut Canvas, name: &str, x: i32, y: i32, size: i32, color: Color) {
-    let s = size.max(8);
-    match name {
-        "cpu" => {
-            canvas.stroke_rect(x + 3, y + 3, s - 6, s - 6, color);
-            canvas.fill_rect(x + 6, y + 6, s - 12, s - 12, color);
-            for offset in [4, 7, 10] {
-                canvas.vline(x + offset, y, y + 2, color);
-                canvas.vline(x + offset, y + s - 3, y + s - 1, color);
-                canvas.hline(x, x + 2, y + offset, color);
-                canvas.hline(x + s - 3, x + s - 1, y + offset, color);
-            }
+#[derive(Clone)]
+struct IconBitmap {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+fn icon_cache() -> &'static OnceLock<HashMap<String, IconBitmap>> {
+    static CACHE: OnceLock<HashMap<String, IconBitmap>> = OnceLock::new();
+    CACHE
+}
+
+fn icon_path(name: &str) -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    candidates.push(std::path::PathBuf::from(format!("assets/icons/{name}.png")));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(format!("assets/icons/{name}.png")));
         }
-        "memory" | "system" | "system_monitor" => {
-            canvas.stroke_rect(x + 1, y + 4, s - 2, s - 8, color);
-            for offset in [4, 7, 10] {
-                canvas.vline(x + offset, y + 5, y + s - 5, color);
-            }
-        }
-        "gauge" | "temp" => {
-            canvas.stroke_rect(x + 6, y + 1, 3, s - 5, color);
-            canvas.fill_rect(x + 5, y + s - 6, 5, 5, color);
-            canvas.fill_rect(x + 7, y + 5, 1, 5, color);
-        }
-        "wifi" => {
-            canvas.fill_rect(x + 6, y + 10, 3, 3, color);
-            canvas.line(x + 2, y + 7, x + 7, y + 3, color);
-            canvas.line(x + 7, y + 3, x + 12, y + 7, color);
-            canvas.line(x, y + 4, x + 7, y, color);
-            canvas.line(x + 7, y, x + 14, y + 4, color);
-        }
-        "battery" => {
-            canvas.stroke_rect(x + 1, y + 4, s - 4, s - 8, color);
-            canvas.fill_rect(x + s - 3, y + 6, 2, 3, color);
-            canvas.fill_rect(x + 3, y + 6, 5, s - 12, color);
-        }
-        "bluetooth" | "bleeding" => {
-            canvas.vline(x + 7, y + 1, y + 13, color);
-            canvas.line(x + 3, y + 4, x + 7, y + 7, color);
-            canvas.line(x + 7, y + 7, x + 3, y + 10, color);
-            canvas.line(x + 11, y + 4, x + 7, y + 7, color);
-            canvas.line(x + 7, y + 7, x + 11, y + 10, color);
-        }
-        "ping" => {
-            canvas.fill_rect(x + 2, y + 6, 3, 3, color);
-            canvas.line(x + 5, y + 7, x + 9, y + 3, color);
-            canvas.line(x + 5, y + 7, x + 9, y + 11, color);
-            canvas.line(x + 8, y + 7, x + 12, y + 4, color);
-            canvas.line(x + 8, y + 7, x + 12, y + 10, color);
-        }
-        "nmap" => {
-            canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color);
-            canvas.hline(x + 2, x + s - 3, y + s / 2, color);
-            canvas.vline(x + s / 2, y + 2, y + s - 3, color);
-            canvas.fill_rect(x + s / 2 - 1, y + s / 2 - 1, 3, 3, color);
-        }
-        "nslookup" => {
-            canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color);
-            canvas.hline(x + 2, x + s - 3, y + s / 2, color);
-            canvas.vline(x + s / 2, y + 2, y + s - 3, color);
-            canvas.line(x + 4, y + 4, x + s - 5, y + s - 5, color);
-        }
-        "terminal" | "proc_monitor" => {
-            canvas.line(x + 2, y + 4, x + 6, y + 7, color);
-            canvas.line(x + 6, y + 7, x + 2, y + 10, color);
-            canvas.hline(x + 8, x + 12, y + 10, color);
-        }
-        "update" => {
-            canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color);
-            canvas.fill_rect(x + 5, y + 5, s - 10, s - 10, color);
-            canvas.line(x + 2, y + 2, x + 5, y + 2, color);
-        }
-        "disk" => {
-            canvas.stroke_rect(x + 2, y + 3, s - 4, s - 6, color);
-            canvas.hline(x + 4, x + s - 5, y + 5, color);
-            canvas.fill_rect(x + s - 6, y + s - 6, 2, 2, color);
-        }
-        "menu" => {
-            for offset in [3, 7, 11] {
-                canvas.hline(x + 2, x + s - 3, y + offset, color);
-            }
-        }
-        _ => canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color),
     }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+fn load_icon_bitmap(name: &str) -> Option<IconBitmap> {
+    let path = icon_path(name)?;
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let bytes = &buf[..info.buffer_size()];
+    let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
+    match info.color_type {
+        png::ColorType::Rgba => rgba.extend_from_slice(bytes),
+        png::ColorType::Rgb => {
+            for c in bytes.chunks(3) {
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for c in bytes.chunks(2) {
+                rgba.extend_from_slice(&[c[0], c[0], c[0], c[1]]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for &g in bytes {
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        _ => return None,
+    }
+    Some(IconBitmap {
+        width: info.width,
+        height: info.height,
+        rgba,
+    })
+}
+
+fn icon_bitmap(name: &str) -> Option<&'static IconBitmap> {
+    let cache = icon_cache().get_or_init(|| {
+        let mut map = HashMap::new();
+        let mut dirs = vec![std::path::PathBuf::from("assets/icons")];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                dirs.push(dir.join("assets/icons"));
+            }
+        }
+        for icons_dir in dirs {
+            if let Ok(entries) = std::fs::read_dir(icons_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("png") {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    if map.contains_key(stem) {
+                        continue;
+                    }
+                    if let Some(icon) = load_icon_bitmap(stem) {
+                        map.insert(stem.to_string(), icon);
+                    }
+                }
+            }
+        }
+        map
+    });
+    cache.get(name)
+}
+
+/// Draw a PNG icon from `assets/icons/<name>.png`, tinted with `color`.
+/// Falls back to a simple rectangle if the icon is missing.
+pub fn draw_icon(canvas: &mut Canvas, name: &str, x: i32, y: i32, size: i32, color: Color) {
+    let s = size.max(1);
+    if let Some(icon) = icon_bitmap(name) {
+        let (r, g, b) = ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
+        for dy in 0..s {
+            let sy = (dy as u32 * icon.height / s as u32).min(icon.height - 1);
+            for dx in 0..s {
+                let sx = (dx as u32 * icon.width / s as u32).min(icon.width - 1);
+                let idx = ((sy * icon.width + sx) * 4) as usize;
+                if idx + 3 >= icon.rgba.len() {
+                    continue;
+                }
+                let alpha = icon.rgba[idx + 3];
+                if alpha < 32 {
+                    continue;
+                }
+                let a = alpha as u32;
+                let pr = ((r * a + 127) / 255) as u8;
+                let pg = ((g * a + 127) / 255) as u8;
+                let pb = ((b * a + 127) / 255) as u8;
+                let px = rgb(pr, pg, pb);
+                canvas.fill_rect(x + dx, y + dy, 1, 1, px);
+            }
+        }
+        return;
+    }
+    canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color);
 }
 
 // ---------------------------------------------------------------------------

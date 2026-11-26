@@ -58,8 +58,8 @@ pub const MODULES: &[ModuleInfo] = &[
     },
     ModuleInfo {
         id: "update",
-        name: "Actualizar HunterZero",
-        description: "Descarga el codigo con git pull --ff-only y muestra el resultado.",
+        name: "Actualizar",
+        description: "Pull, build, instala y reinicia desde la UI.",
         icon: "update",
     },
 ];
