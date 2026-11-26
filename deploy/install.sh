@@ -188,18 +188,18 @@ run_preflight_checks() {
   fi
 
   # Gates opcionales si las herramientas están instaladas.
-  if require_cmd rustfmt || rustup component list --installed 2>/dev/null | grep -q rustfmt; then
+  if cargo fmt --version >/dev/null 2>&1; then
     log "Preflight: cargo fmt --check..."
     cargo fmt --all -- --check || warn "Formato no cumple cargo fmt (no bloqueante en Pi, pero conviene corregirlo)."
   else
-    warn "rustfmt no instalado; omitiendo cargo fmt --check."
+    warn "rustfmt/cargo-fmt no disponible; omitiendo cargo fmt --check."
   fi
 
-  if rustup component list --installed 2>/dev/null | grep -q clippy; then
+  if cargo clippy --version >/dev/null 2>&1; then
     log "Preflight: cargo clippy..."
     cargo_with_jobs "$jobs" clippy --all-targets -- -D warnings || warn "Clippy reportó warnings/errores (no bloqueante en instalador automático)."
   else
-    warn "clippy no instalado; omitiendo cargo clippy."
+    warn "clippy no disponible; omitiendo cargo clippy."
   fi
 }
 
