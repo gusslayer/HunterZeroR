@@ -21,6 +21,12 @@ pub const MODULES: &[ModuleInfo] = &[
         icon: "bleeding",
     },
     ModuleInfo {
+        id: "logs",
+        name: "Logs",
+        description: "Visor de logs de aplicacion y ultimo comando ejecutado.",
+        icon: "file",
+    },
+    ModuleInfo {
         id: "nmap",
         name: "Nmap",
         description: "Escaneo TCP connect con scripts NSE y opciones acotadas.",

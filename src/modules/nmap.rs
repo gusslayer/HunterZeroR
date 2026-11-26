@@ -76,10 +76,6 @@ impl ToolScreen for NmapScreen {
         self.inner.draw(canvas, processes, stats);
     }
 
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        self.inner.footer_hints()
-    }
-
     fn close(&mut self, processes: &mut ProcessManager) {
         self.inner.close(processes);
     }

@@ -14,6 +14,7 @@ Portable diagnostics UI for **GPi Case 2W + Raspberry Pi Zero W v1.1** (PiOS Lit
 | ID | Función |
 |---|---|
 | `bleeding` | Bluetooth LE / BR-EDR scan, enum, DeAuth acotado |
+| `logs` | Visor on-device de `logs/app.log` y `logs/commands/latest.log` |
 | `nmap` | TCP connect scan acotado con NSE opcional |
 | `nslookup` | DNS lookup interactivo (A/AAAA) |
 | `ping` | ICMP echo manual |
@@ -53,7 +54,7 @@ Portable diagnostics UI for **GPi Case 2W + Raspberry Pi Zero W v1.1** (PiOS Lit
     ├── core/        # input, font, logging, plugins, process_manager, state, system_stats, ui, validation
     ├── gfx.rs       # canvas 320x240
     ├── main.rs      # loop, menú, backend
-    ├── modules/     # 7 ToolScreen modules
+    ├── modules/     # 8 ToolScreen modules
     ├── platform/    # linux fbdev+evdev, windows gdi
     └── theme.rs     # colores y layout
 ```

@@ -8,6 +8,7 @@ use crate::core::system_stats::SystemStats;
 use crate::gfx::Canvas;
 
 pub mod bleeding;
+pub mod logs;
 pub mod nmap;
 pub mod nslookup;
 pub mod parameterized;
@@ -37,8 +38,6 @@ pub trait ToolScreen {
 
     fn draw(&mut self, canvas: &mut Canvas, processes: &ProcessManager, stats: &SystemStats);
 
-    fn footer_hints(&self) -> Vec<(&'static str, i32)>;
-
     /// Stop background work when the user leaves the module.
     fn close(&mut self, processes: &mut ProcessManager) {
         let _ = processes;
@@ -49,6 +48,7 @@ pub trait ToolScreen {
 pub fn create(id: &str, root: &Path) -> Option<Box<dyn ToolScreen>> {
     match id {
         "bleeding" => Some(Box::new(bleeding::BleedingScreen::new())),
+        "logs" => Some(Box::new(logs::LogsScreen::new(root))),
         "nmap" => Some(Box::new(nmap::NmapScreen::new())),
         "nslookup" => Some(Box::new(nslookup::NsLookupScreen::new())),
         "ping" => Some(Box::new(ping::PingScreen::new())),

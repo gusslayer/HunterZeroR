@@ -210,7 +210,7 @@ impl BleedingScreen {
                 let step = if action == Action::Right { 1 } else { -1 };
                 self.mode = (((self.mode as i32 + step) % 2 + 2) % 2) as usize;
             }
-            Action::Open => match self.selected {
+            Action::Open | Action::Start => match self.selected {
                 0 => self.mode = (self.mode + 1) % 2,
                 1 => {
                     self.editor.begin();
@@ -243,7 +243,7 @@ impl BleedingScreen {
             match action {
                 Action::Up => self.device_view.move_by(-1),
                 Action::Down => self.device_view.move_by(1),
-                Action::Open => {
+                Action::Open | Action::Start => {
                     if let Some(device) = self.devices.get(self.device_view.selected) {
                         self.editor = MacEditor::new(&device.address);
                         self.selected = 1;
@@ -269,7 +269,7 @@ impl BleedingScreen {
                 _ => {}
             }
         }
-        if action == Action::Open || action == Action::Back {
+        if action == Action::Open || action == Action::Start || action == Action::Back {
             self.phase = Phase::Settings;
         }
         Outcome::Stay
@@ -288,7 +288,7 @@ impl BleedingScreen {
                 let step = if action == Action::Right { 1 } else { -1 };
                 self.change_parameter(step);
             }
-            Action::Open => match self.prepare_selected {
+            Action::Open | Action::Start => match self.prepare_selected {
                 4 => self.phase = Phase::Confirm,
                 5 => self.phase = Phase::Settings,
                 _ => {}
@@ -576,7 +576,8 @@ impl ToolScreen for BleedingScreen {
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match self.phase {
             Phase::EditTarget => {
-                if let Some(EditResult::Saved | EditResult::Cancelled) = self.editor.handle(action)
+                if let Some(EditResult::Saved | EditResult::Cancelled) =
+                    self.editor.handle(action.as_open())
                 {
                     self.phase = Phase::Settings;
                 }
@@ -588,7 +589,7 @@ impl ToolScreen for BleedingScreen {
             Phase::Confirm => {
                 match action {
                     Action::Back => self.phase = Phase::Prepare,
-                    Action::Open => self.start_deauth(processes),
+                    Action::Open | Action::Start => self.start_deauth(processes),
                     _ => {}
                 }
                 Outcome::Stay
@@ -616,7 +617,7 @@ impl ToolScreen for BleedingScreen {
                         self.result_view.move_by(1);
                         Outcome::Stay
                     }
-                    Action::Open => {
+                    Action::Open | Action::Start => {
                         self.phase = Phase::Settings;
                         Outcome::Stay
                     }
@@ -636,7 +637,7 @@ impl ToolScreen for BleedingScreen {
                     self.help_scroll.move_by(1);
                     Outcome::Stay
                 }
-                Action::Open => {
+                Action::Open | Action::Start => {
                     self.phase = Phase::Settings;
                     Outcome::Stay
                 }
@@ -691,27 +692,6 @@ impl ToolScreen for BleedingScreen {
             Phase::Devices => self.draw_devices(canvas),
             Phase::Services => self.draw_services(canvas),
             Phase::Result => self.draw_result(canvas),
-        }
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        match self.phase {
-            Phase::EditTarget => vec![("ARR/ABA HEX", 8), ("IZQ/DER POS", 118), ("A GUARDAR", 240)],
-            Phase::Devices | Phase::Services => vec![
-                ("ARR/ABA LISTA", 8),
-                ("A SELECCIONAR", 150),
-                ("B VOLVER", 240),
-            ],
-            Phase::Prepare => vec![("IZQ/DER VALOR", 8), ("A INICIAR", 168), ("B VOLVER", 240)],
-            Phase::Confirm => vec![("A ATACAR", 8), ("B CANCELAR", 120)],
-            Phase::Running => vec![("B CANCELAR", 8)],
-            Phase::Result => vec![("ARR/ABA TEXTO", 8), ("A OPCIONES", 150), ("B VOLVER", 240)],
-            Phase::Help => vec![("ARR/ABA TEXTO", 8), ("A OPCIONES", 168), ("B VOLVER", 240)],
-            Phase::Settings => vec![
-                ("ARR/ABA MOVER", 8),
-                ("IZQ/DER MODO", 136),
-                ("A ABRIR", 240),
-            ],
         }
     }
 

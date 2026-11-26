@@ -64,7 +64,7 @@ impl ToolScreen for ProcMonitorScreen {
     fn handle(&mut self, action: Action, _processes: &mut ProcessManager) -> Outcome {
         if self.show_help {
             match action {
-                Action::Open => self.show_help = false,
+                Action::Open | Action::Start => self.show_help = false,
                 Action::Back => return Outcome::Close,
                 Action::Up => self.help_scroll.move_by(-1),
                 Action::Down => self.help_scroll.move_by(1),
@@ -74,7 +74,7 @@ impl ToolScreen for ProcMonitorScreen {
         }
         match action {
             Action::Back => Outcome::Close,
-            Action::Open => {
+            Action::Open | Action::Start => {
                 self.show_help = true;
                 Outcome::Stay
             }
@@ -100,7 +100,13 @@ impl ToolScreen for ProcMonitorScreen {
     }
 
     fn draw(&mut self, canvas: &mut Canvas, _processes: &ProcessManager, _stats: &SystemStats) {
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         if self.show_help {
             draw_help(canvas, HELP, &mut self.help_scroll);
             return;
@@ -140,14 +146,6 @@ impl ToolScreen for ProcMonitorScreen {
             self.list_view.has_below(),
             ACCENT_COLOR,
         );
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        if self.show_help {
-            vec![("ARR/ABA TEXTO", 8), ("A AYUDA", 168), ("B MENU", 240)]
-        } else {
-            vec![("ARR/ABA LISTA", 8), ("A AYUDA", 150), ("B MENU", 240)]
-        }
     }
 }
 

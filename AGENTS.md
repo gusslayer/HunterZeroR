@@ -18,11 +18,12 @@ Target de despliegue: Raspberry Pi Zero W v1.1, PiOS Lite 32-bit `armhf`, GPi Ca
   - `handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome`
   - `sync(&mut self, processes: &mut ProcessManager)` (poll no bloqueante, default noop)
   - `draw(&mut self, canvas: &mut Canvas, processes: &ProcessManager, stats: &SystemStats)`
-  - `footer_hints(&self) -> Vec<(&'static str, i32)>`
   - `close(&mut self, processes: &mut ProcessManager)` (cleanup)
 - `Outcome::{Stay, Close}`. `Back` vuelve al menú; no salir de la app desde un módulo.
 - Registrar sin tocar lógica core: `pub mod <nombre>;` y rama en `modules::create(...)` (`src/modules/mod.rs`) + entrada en `core::plugins::MODULES`.
 - Reutilizar `src/gfx.rs`, `src/theme.rs`, `src/core/ui.rs`. Dibujar solo dentro de `CONTENT_TOP..CONTENT_BOTTOM`.
+- Header/footer globales fijos los dibuja solo `src/main.rs` con `draw_global_header`/`draw_global_footer`; los módulos no los dibujan ni exponen hints.
+- Aislamiento de fallos: `main` limpia content area antes de dibujar módulo, envuelve `handle/sync/draw` en `catch_unwind(AssertUnwindSafe(..))`; ante pánico detiene procesos, loguea `[ERROR]`, cierra módulo y vuelve al menú con alerta breve. (Efectivo con `panic=unwind`; en release `panic=abort` no captura.)
 - Para herramientas parametrizadas, reutilizar `modules::parameterized::{ParameterizedScreen, ToolSpec}`.
 
 ## 3. Entrada y ayuda

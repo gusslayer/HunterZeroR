@@ -6,7 +6,9 @@ use std::time::Instant;
 use crate::core::input::Action;
 use crate::core::process_manager::ProcessManager;
 use crate::core::system_stats::SystemStats;
-use crate::core::ui::{draw_scroll_indicator, ScrollState};
+use crate::core::ui::{
+    draw_help, draw_row, draw_scroll_indicator, help_capacity, HelpSection, ScrollState,
+};
 use crate::gfx::{wrap_text, Canvas};
 use crate::theme::*;
 
@@ -16,15 +18,35 @@ const RESULT_TOP: i32 = 38;
 const RESULT_BOTTOM: i32 = 208;
 const RESULT_ROW: i32 = 16;
 
+static HELP: &[HelpSection] = &[
+    HelpSection {
+        heading: "ACTUALIZACION",
+        paragraphs: &[
+            "Ejecuta deploy/update.sh con git pull --ff-only.",
+            "Requiere red y repositorio git configurado.",
+        ],
+    },
+    HelpSection {
+        heading: "CONTROLES",
+        paragraphs: &[
+            "START o A en INICIAR lanzan la actualizacion.",
+            "B cancela durante la ejecucion o vuelve al menu.",
+        ],
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    Confirm,
+    Menu,
+    Help,
     Running,
     Result,
 }
 
 pub struct UpdateScreen {
     phase: Phase,
+    selected: usize,
+    help_scroll: ScrollState,
     started_at: Instant,
     last_sync: Instant,
     activity: f32,
@@ -35,7 +57,9 @@ pub struct UpdateScreen {
 impl UpdateScreen {
     pub fn new(root: &Path) -> Self {
         Self {
-            phase: Phase::Confirm,
+            phase: Phase::Menu,
+            selected: 0,
+            help_scroll: ScrollState::new(help_capacity()),
             started_at: Instant::now(),
             last_sync: Instant::now(),
             activity: 0.0,
@@ -51,6 +75,18 @@ impl UpdateScreen {
         }
         lines
     }
+
+    fn start(&mut self, processes: &mut ProcessManager) {
+        if processes.start_update() {
+            self.started_at = Instant::now();
+            self.last_sync = self.started_at;
+            self.activity = 0.0;
+            self.phase = Phase::Running;
+        } else {
+            self.result_view.reset(self.result_lines(processes).len());
+            self.phase = Phase::Result;
+        }
+    }
 }
 
 impl ToolScreen for UpdateScreen {
@@ -60,16 +96,45 @@ impl ToolScreen for UpdateScreen {
 
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match self.phase {
-            Phase::Confirm => match action {
-                Action::Open => {
-                    if processes.start_update() {
-                        self.started_at = Instant::now();
-                        self.last_sync = self.started_at;
-                        self.activity = 0.0;
-                        self.phase = Phase::Running;
-                    } else {
-                        self.phase = Phase::Result;
+            Phase::Menu => match action {
+                Action::Up => {
+                    self.selected = (self.selected + 2) % 3;
+                    Outcome::Stay
+                }
+                Action::Down => {
+                    self.selected = (self.selected + 1) % 3;
+                    Outcome::Stay
+                }
+                Action::Start => {
+                    self.start(processes);
+                    Outcome::Stay
+                }
+                Action::Open => match self.selected {
+                    0 => {
+                        self.start(processes);
+                        Outcome::Stay
                     }
+                    1 => {
+                        self.help_scroll.reset(help_capacity());
+                        self.phase = Phase::Help;
+                        Outcome::Stay
+                    }
+                    _ => Outcome::Close,
+                },
+                Action::Back => Outcome::Close,
+                _ => Outcome::Stay,
+            },
+            Phase::Help => match action {
+                Action::Up => {
+                    self.help_scroll.move_by(-1);
+                    Outcome::Stay
+                }
+                Action::Down => {
+                    self.help_scroll.move_by(1);
+                    Outcome::Stay
+                }
+                Action::Open | Action::Start => {
+                    self.phase = Phase::Menu;
                     Outcome::Stay
                 }
                 Action::Back => Outcome::Close,
@@ -78,13 +143,14 @@ impl ToolScreen for UpdateScreen {
             Phase::Running => {
                 if action == Action::Back {
                     processes.stop();
+                    self.result_view.reset(self.result_lines(processes).len());
                     self.phase = Phase::Result;
                 }
                 Outcome::Stay
             }
             Phase::Result => {
-                self.result_view
-                    .update(self.result_lines(processes).len(), None);
+                let lines = self.result_lines(processes);
+                self.result_view.update(lines.len(), None);
                 match action {
                     Action::Up => {
                         self.result_view.move_by(-1);
@@ -94,7 +160,12 @@ impl ToolScreen for UpdateScreen {
                         self.result_view.move_by(1);
                         Outcome::Stay
                     }
-                    _ => Outcome::Close,
+                    Action::Open | Action::Start => {
+                        self.phase = Phase::Menu;
+                        Outcome::Stay
+                    }
+                    Action::Back => Outcome::Close,
+                    _ => Outcome::Stay,
                 }
             }
         }
@@ -104,29 +175,44 @@ impl ToolScreen for UpdateScreen {
         let now = Instant::now();
         if self.phase == Phase::Running {
             self.activity += now.duration_since(self.last_sync).as_secs_f32();
+            if !processes.is_running() {
+                self.result_view.reset(self.result_lines(processes).len());
+                self.phase = Phase::Result;
+            }
         }
         self.last_sync = now;
-        if self.phase == Phase::Running && !processes.is_running() {
-            self.phase = Phase::Result;
-        }
     }
 
     fn draw(&mut self, canvas: &mut Canvas, processes: &ProcessManager, _stats: &SystemStats) {
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         match self.phase {
-            Phase::Confirm => {
-                let mut lines = wrap_text("Descarga el codigo con git pull --ff-only.", 34);
-                lines.extend(wrap_text("Los pasos con sudo se indican al terminar.", 34));
-                lines.push("A: ACTUALIZAR   B: VOLVER".to_string());
-                for (index, line) in lines.iter().enumerate() {
-                    let color = if index == lines.len() - 1 {
-                        ACCENT_COLOR
-                    } else {
-                        TEXT_COLOR
-                    };
-                    canvas.draw_text(line, 16, 36 + index as i32 * 13, color, 1);
+            Phase::Menu => {
+                let rows = ["INICIAR ACTUALIZACION", "AYUDA", "VOLVER"];
+                for (index, label) in rows.iter().enumerate() {
+                    draw_row(
+                        canvas,
+                        12,
+                        36 + index as i32 * 20,
+                        296,
+                        18,
+                        label,
+                        "",
+                        index == self.selected,
+                        None,
+                    );
+                }
+                let tip = "Usa git pull --ff-only desde deploy/update.sh.";
+                for (index, line) in wrap_text(tip, 34).iter().take(2).enumerate() {
+                    canvas.draw_text(line, 16, 120 + index as i32 * 12, MUTED_COLOR, 1);
                 }
             }
+            Phase::Help => draw_help(canvas, HELP, &mut self.help_scroll),
             Phase::Running => {
                 let elapsed = self.started_at.elapsed().as_secs();
                 let dots = ".".repeat((elapsed % 4) as usize);
@@ -174,14 +260,6 @@ impl ToolScreen for UpdateScreen {
                     ACCENT_COLOR,
                 );
             }
-        }
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        match self.phase {
-            Phase::Confirm => vec![("A ACTUALIZAR", 12), ("B VOLVER", 168)],
-            Phase::Running => vec![("B CANCELAR", 12)],
-            Phase::Result => vec![("ARR/ABA TEXTO", 8), ("A/B VOLVER", 150)],
         }
     }
 

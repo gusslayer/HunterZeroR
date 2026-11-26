@@ -28,7 +28,7 @@ static HELP: &[HelpSection] = &[
 pub struct SystemMonitorScreen {
     show_help: bool,
     help_scroll: ScrollState,
-    disk_percent: u32,
+    disk_percent: u8,
     last_disk_refresh: Instant,
 }
 
@@ -58,7 +58,7 @@ impl ToolScreen for SystemMonitorScreen {
         if action == Action::Back {
             return Outcome::Close;
         }
-        if action == Action::Open {
+        if action == Action::Open || action == Action::Start {
             self.show_help = !self.show_help;
             return Outcome::Stay;
         }
@@ -84,7 +84,13 @@ impl ToolScreen for SystemMonitorScreen {
             draw_help(canvas, HELP, &mut self.help_scroll);
             return;
         }
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         draw_frame(canvas, 10, 32, 300, 136, GRID_COLOR, Some(PANEL_COLOR));
         let temperature = stats
             .temperature_c
@@ -96,7 +102,7 @@ impl ToolScreen for SystemMonitorScreen {
             .unwrap_or_else(|| "N/D".to_string());
         let values = [
             format!("CPU: {}%", stats.cpu_percent),
-            format!("RAM: {}%", stats.memory_percent),
+            format!("RAM: {}%", stats.ram_percent),
             format!("DISCO: {}%", self.disk_percent),
             format!("TEMP: {temperature}"),
             format!("IP: {}", stats.local_ip),
@@ -115,14 +121,6 @@ impl ToolScreen for SystemMonitorScreen {
         for (index, value) in values.iter().enumerate() {
             let color = if index < 3 { ACCENT_COLOR } else { TEXT_COLOR };
             canvas.draw_text_clipped(value, 18, 38 + index as i32 * 15, 284, color, 1);
-        }
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        if self.show_help {
-            vec![("ARR/ABA TEXTO", 8), ("A METRICAS", 168), ("B MENU", 240)]
-        } else {
-            vec![("A AYUDA", 12), ("B MENU", 168)]
         }
     }
 }

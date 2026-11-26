@@ -2,6 +2,7 @@
 
 use crate::core::font;
 use crate::core::input::Action;
+use crate::core::system_stats::SystemStats;
 use crate::core::validation::{normalize_hostname, normalize_mac};
 use crate::gfx::{wrap_text, Canvas};
 use crate::theme::*;
@@ -247,12 +248,122 @@ pub fn draw_icon(canvas: &mut Canvas, name: &str, x: i32, y: i32, size: i32, col
             canvas.fill_rect(x + 5, y + 5, s - 10, s - 10, color);
             canvas.line(x + 2, y + 2, x + 5, y + 2, color);
         }
+        "disk" => {
+            canvas.stroke_rect(x + 2, y + 3, s - 4, s - 6, color);
+            canvas.hline(x + 4, x + s - 5, y + 5, color);
+            canvas.fill_rect(x + s - 6, y + s - 6, 2, 2, color);
+        }
         "menu" => {
             for offset in [3, 7, 11] {
                 canvas.hline(x + 2, x + s - 3, y + offset, color);
             }
         }
         _ => canvas.stroke_rect(x + 2, y + 2, s - 4, s - 4, color),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Global HUD
+// ---------------------------------------------------------------------------
+
+/// Fixed header: 6 system indicators, y 0..27.
+pub fn draw_global_header(canvas: &mut Canvas, stats: &SystemStats) {
+    canvas.fill_rect(0, 0, SCREEN_WIDTH as i32, HEADER_HEIGHT, BG_COLOR);
+    canvas.hline(0, SCREEN_WIDTH as i32 - 1, HEADER_HEIGHT - 1, GRID_COLOR);
+
+    let icon_y = 6;
+    let text_y = 9; // 14px icon, 8px text -> vertically centered around y=6..20
+
+    // CPU x=4
+    draw_icon(canvas, "cpu", 4, icon_y, 14, TEXT_COLOR);
+    canvas.draw_text(
+        &format!("{}%", stats.cpu_percent),
+        22,
+        text_y,
+        TEXT_COLOR,
+        1,
+    );
+
+    // RAM x=60
+    draw_icon(canvas, "memory", 60, icon_y, 14, TEXT_COLOR);
+    canvas.draw_text(
+        &format!("{}%", stats.ram_percent),
+        78,
+        text_y,
+        TEXT_COLOR,
+        1,
+    );
+
+    // Disk x=116
+    draw_icon(canvas, "disk", 116, icon_y, 14, TEXT_COLOR);
+    canvas.draw_text(
+        &format!("{}%", stats.disk_percent),
+        134,
+        text_y,
+        TEXT_COLOR,
+        1,
+    );
+
+    // Wi-Fi x=176
+    let wifi_color = if stats.wifi_connected {
+        SUCCESS_COLOR
+    } else {
+        MUTED_COLOR
+    };
+    draw_icon(canvas, "wifi", 176, icon_y, 14, wifi_color);
+
+    // Bluetooth x=200
+    let bt_color = if stats.bluetooth_active {
+        ACCENT_COLOR
+    } else {
+        MUTED_COLOR
+    };
+    draw_icon(canvas, "bluetooth", 200, icon_y, 14, bt_color);
+
+    // Battery x=228
+    let battery_color = if stats.battery_charging {
+        SUCCESS_COLOR
+    } else if stats.battery_percent.unwrap_or(100) < 20 {
+        ERROR_COLOR
+    } else {
+        TEXT_COLOR
+    };
+    draw_icon(canvas, "battery", 228, icon_y, 14, battery_color);
+    if stats.battery_charging {
+        // small "+" indicator inside/right of battery icon
+        canvas.draw_text("+", 240, 7, battery_color, 1);
+    }
+    let battery_text = match stats.battery_percent {
+        Some(value) => format!("{value}%"),
+        None => "N/D".to_string(),
+    };
+    let battery_text_color = if stats.battery_percent.is_none() {
+        MUTED_COLOR
+    } else {
+        battery_color
+    };
+    canvas.draw_text(&battery_text, 246, text_y, battery_text_color, 1);
+}
+
+/// Fixed footer: 4 global hints, y 211..240.
+pub fn draw_global_footer(canvas: &mut Canvas) {
+    canvas.fill_rect(0, FOOTER_TOP, SCREEN_WIDTH as i32, FOOTER_HEIGHT, BG_COLOR);
+    canvas.hline(0, SCREEN_WIDTH as i32 - 1, FOOTER_TOP, GRID_COLOR);
+    let hints = [
+        ("D-PAD Mover", 4),
+        ("A Abrir", 116),
+        ("START Ejecutar", 188),
+        ("B Volver", 272),
+    ];
+    for (text, x) in hints {
+        canvas.draw_text_clipped(
+            text,
+            x,
+            FOOTER_TOP + 11,
+            SCREEN_WIDTH as i32 - x - 2,
+            TEXT_COLOR,
+            1,
+        );
     }
 }
 
@@ -374,7 +485,13 @@ fn build_help_lines(sections: &[HelpSection]) -> Vec<(String, bool)> {
 
 /// Render help sections. The caller's scroll offset is clamped in place.
 pub fn draw_help(canvas: &mut Canvas, sections: &[HelpSection], scroll: &mut ScrollState) {
-    canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+    canvas.fill_rect(
+        0,
+        CONTENT_TOP,
+        SCREEN_WIDTH as i32,
+        CONTENT_HEIGHT,
+        BG_COLOR,
+    );
     let lines = build_help_lines(sections);
     let capacity = help_capacity();
     scroll.update(lines.len(), Some(capacity));
@@ -479,7 +596,13 @@ impl Ipv4Editor {
     }
 
     pub fn draw(&self, canvas: &mut Canvas) {
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         canvas.draw_text("EDITAR IP", 15, 44, ACCENT_COLOR, 1);
         for index in 0..4 {
             let group_x = 18 + index as i32 * 72;
@@ -616,7 +739,13 @@ impl MacEditor {
     }
 
     pub fn draw(&self, canvas: &mut Canvas) {
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         draw_frame(canvas, 10, 32, 300, 30, GRID_COLOR, Some(PANEL_COLOR));
         canvas.draw_text("MAC", 16, 36, MUTED_COLOR, 1);
         let value = self.value();
@@ -761,7 +890,13 @@ impl HostnameEditor {
     }
 
     pub fn draw(&self, canvas: &mut Canvas) {
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         canvas.fill_rect(10, 32, 300, 30, PANEL_COLOR);
         canvas.stroke_rect(10, 32, 300, 30, GRID_COLOR);
         canvas.draw_text("HOST", 16, 36, MUTED_COLOR, 1);

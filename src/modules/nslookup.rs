@@ -81,12 +81,18 @@ impl NsLookupScreen {
                 self.record_type =
                     (((self.record_type as i32 + step) % count + count) % count) as usize;
             }
-            Action::Open => match self.selected {
+            Action::Open | Action::Start => match self.selected {
                 0 => {
                     self.editor.begin();
                     self.phase = Phase::EditHost;
                 }
-                2 => self.phase = Phase::Confirm,
+                2 => {
+                    if action == Action::Start {
+                        self.start_command(processes);
+                    } else {
+                        self.phase = Phase::Confirm;
+                    }
+                }
                 3 => self.phase = Phase::Help,
                 4 => return Outcome::Close,
                 _ => {}
@@ -131,7 +137,8 @@ impl ToolScreen for NsLookupScreen {
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match self.phase {
             Phase::EditHost => {
-                if let Some(EditResult::Saved | EditResult::Cancelled) = self.editor.handle(action)
+                if let Some(EditResult::Saved | EditResult::Cancelled) =
+                    self.editor.handle(action.as_open())
                 {
                     self.phase = Phase::Settings;
                 }
@@ -140,7 +147,7 @@ impl ToolScreen for NsLookupScreen {
             Phase::Confirm => {
                 match action {
                     Action::Back => self.phase = Phase::Settings,
-                    Action::Open => self.start_command(processes),
+                    Action::Open | Action::Start => self.start_command(processes),
                     _ => {}
                 }
                 Outcome::Stay
@@ -153,7 +160,7 @@ impl ToolScreen for NsLookupScreen {
                 Outcome::Stay
             }
             Phase::Result => match action {
-                Action::Open => {
+                Action::Open | Action::Start => {
                     self.phase = Phase::Settings;
                     Outcome::Stay
                 }
@@ -169,7 +176,7 @@ impl ToolScreen for NsLookupScreen {
                     self.help_scroll.move_by(1);
                     Outcome::Stay
                 }
-                Action::Open => {
+                Action::Open | Action::Start => {
                     self.phase = Phase::Settings;
                     Outcome::Stay
                 }
@@ -196,7 +203,13 @@ impl ToolScreen for NsLookupScreen {
             draw_help(canvas, HELP, &mut self.help_scroll);
             return;
         }
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         match self.phase {
             Phase::Settings => {
                 let values = [
@@ -291,25 +304,6 @@ impl ToolScreen for NsLookupScreen {
                 }
             }
             Phase::EditHost | Phase::Help => {}
-        }
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        match self.phase {
-            Phase::EditHost => vec![
-                ("UP/DOWN LETRA", 8),
-                ("IZQ/DER CURSOR", 118),
-                ("A GUARDAR", 240),
-            ],
-            Phase::Confirm => vec![("A CONSULTAR", 8), ("B CANCELAR", 168)],
-            Phase::Running => vec![("B CANCELAR", 8)],
-            Phase::Help => vec![("ARR/ABA TEXTO", 8), ("A VOLVER", 168), ("B SALIR", 240)],
-            Phase::Result => vec![("A OPCIONES", 8), ("B VOLVER", 168)],
-            Phase::Settings => vec![
-                ("UP/DOWN MOVER", 8),
-                ("IZQ/DER TIPO", 118),
-                ("A ABRIR", 250),
-            ],
         }
     }
 

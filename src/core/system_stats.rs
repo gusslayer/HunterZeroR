@@ -14,42 +14,50 @@ use chrono::Local;
 /// One reading shown by the HUD and the system monitor.
 #[derive(Debug, Clone)]
 pub struct SystemStats {
-    pub cpu_percent: u32,
-    pub memory_percent: u32,
-    pub temperature_c: Option<i32>,
-    pub battery_percent: Option<u32>,
-    pub battery_charging: bool,
-    pub clock: String,
+    pub cpu_percent: u8,
+    pub ram_percent: u8,
+    pub disk_percent: u8,
     pub wifi_connected: bool,
+    pub bluetooth_active: bool,
+    pub battery_percent: Option<u8>,
+    pub battery_charging: bool,
+    pub temperature_c: Option<i32>,
+    pub clock: String,
     pub local_ip: String,
     pub ssid: Option<String>,
-    pub disk_percent: u32,
 }
 
 impl Default for SystemStats {
     fn default() -> Self {
         Self {
             cpu_percent: 0,
-            memory_percent: 0,
-            temperature_c: None,
+            ram_percent: 0,
+            disk_percent: 0,
+            wifi_connected: false,
+            bluetooth_active: false,
             battery_percent: None,
             battery_charging: false,
+            temperature_c: None,
             clock: "--:--".to_string(),
-            wifi_connected: false,
             local_ip: "N/D".to_string(),
             ssid: None,
-            disk_percent: 0,
         }
     }
 }
 
 const NETWORK_REFRESH_SECONDS: u64 = 10;
+const DISK_REFRESH_SECONDS: u64 = 10;
+const BLUETOOTH_REFRESH_SECONDS: u64 = 10;
 
-/// Stateful reader that keeps the previous CPU sample and network cache.
+/// Stateful reader that keeps previous samples and periodic caches.
 pub struct StatsReader {
     previous_cpu: Option<(u64, u64)>,
     network_cache: Option<(String, Option<String>)>,
     network_read_at: Option<Instant>,
+    disk_percent: u8,
+    disk_read_at: Option<Instant>,
+    bluetooth_active: bool,
+    bluetooth_read_at: Option<Instant>,
     #[cfg(windows)]
     system: sysinfo::System,
 }
@@ -67,16 +75,20 @@ impl StatsReader {
             previous_cpu: None,
             network_cache: None,
             network_read_at: None,
+            disk_percent: 0,
+            disk_read_at: None,
+            bluetooth_active: false,
+            bluetooth_read_at: None,
             #[cfg(windows)]
             system,
         }
     }
 
-    /// Read the current values. Call it every few seconds, not every frame.
+    /// Read current values. Cheap enough for periodic polling; disk/bluetooth/network are cached.
     pub fn read(&mut self) -> SystemStats {
-        let (cpu_percent, memory_percent) = self.cpu_and_memory();
-
+        let (cpu_percent, ram_percent) = self.cpu_and_memory();
         let now = Instant::now();
+
         let refresh_network = self
             .network_read_at
             .map(|last| now.duration_since(last) >= Duration::from_secs(NETWORK_REFRESH_SECONDS))
@@ -91,22 +103,41 @@ impl StatsReader {
             .clone()
             .unwrap_or_else(|| ("N/D".to_string(), None));
 
+        let refresh_disk = self
+            .disk_read_at
+            .map(|last| now.duration_since(last) >= Duration::from_secs(DISK_REFRESH_SECONDS))
+            .unwrap_or(true);
+        if refresh_disk {
+            self.disk_percent = disk_usage_percent();
+            self.disk_read_at = Some(now);
+        }
+
+        let refresh_bt = self
+            .bluetooth_read_at
+            .map(|last| now.duration_since(last) >= Duration::from_secs(BLUETOOTH_REFRESH_SECONDS))
+            .unwrap_or(true);
+        if refresh_bt {
+            self.bluetooth_active = bluetooth_active();
+            self.bluetooth_read_at = Some(now);
+        }
+
         SystemStats {
             cpu_percent,
-            memory_percent,
-            temperature_c: read_temperature(),
+            ram_percent,
+            disk_percent: self.disk_percent,
+            wifi_connected: ssid.is_some() || wifi_operstate_up(),
+            bluetooth_active: self.bluetooth_active,
             battery_percent: read_battery(),
             battery_charging: read_battery_charging(),
+            temperature_c: read_temperature(),
             clock: Local::now().format("%H:%M").to_string(),
-            wifi_connected: ssid.is_some() || wifi_operstate_up(),
             local_ip,
             ssid,
-            disk_percent: disk_usage_percent(),
         }
     }
 
     #[cfg(target_os = "linux")]
-    fn cpu_and_memory(&mut self) -> (u32, u32) {
+    fn cpu_and_memory(&mut self) -> (u8, u8) {
         let cpu_percent = match read_cpu_times() {
             Some((total, idle)) => {
                 let percent = match self.previous_cpu {
@@ -117,20 +148,20 @@ impl StatsReader {
                         let idle_delta = idle - previous_idle;
                         (((total_delta - idle_delta) as f64 / total_delta as f64) * 100.0)
                             .round()
-                            .clamp(0.0, 100.0) as u32
+                            .clamp(0.0, 100.0) as u8
                     }
-                    _ => 0,
+                    _ => 0u8,
                 };
                 self.previous_cpu = Some((total, idle));
                 percent
             }
-            None => 0,
+            None => 0u8,
         };
         (cpu_percent, read_memory_percent().unwrap_or(0))
     }
 
     #[cfg(windows)]
-    fn cpu_and_memory(&mut self) -> (u32, u32) {
+    fn cpu_and_memory(&mut self) -> (u8, u8) {
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
         let cpu_percent = self
@@ -138,20 +169,20 @@ impl StatsReader {
             .global_cpu_info()
             .cpu_usage()
             .round()
-            .clamp(0.0, 100.0) as u32;
+            .clamp(0.0, 100.0) as u8;
         let total = self.system.total_memory();
         let memory_percent = if total == 0 {
-            0
+            0u8
         } else {
             ((self.system.used_memory() as f64 / total as f64) * 100.0)
                 .round()
-                .clamp(0.0, 100.0) as u32
+                .clamp(0.0, 100.0) as u8
         };
         (cpu_percent, memory_percent)
     }
 
     #[cfg(not(any(target_os = "linux", windows)))]
-    fn cpu_and_memory(&mut self) -> (u32, u32) {
+    fn cpu_and_memory(&mut self) -> (u8, u8) {
         (0, 0)
     }
 }
@@ -198,7 +229,7 @@ fn read_cpu_times() -> Option<(u64, u64)> {
 }
 
 #[cfg(target_os = "linux")]
-fn read_memory_percent() -> Option<u32> {
+fn read_memory_percent() -> Option<u8> {
     let content = std::fs::read_to_string("/proc/meminfo").ok()?;
     let mut total = 0u64;
     let mut available = 0u64;
@@ -227,7 +258,7 @@ fn read_memory_percent() -> Option<u32> {
     Some(
         (((total.saturating_sub(available)) as f64 / total as f64) * 100.0)
             .round()
-            .clamp(0.0, 100.0) as u32,
+            .clamp(0.0, 100.0) as u8,
     )
 }
 
@@ -346,12 +377,12 @@ fn read_temperature() -> Option<i32> {
 }
 
 #[cfg(target_os = "linux")]
-fn read_battery() -> Option<u32> {
+fn read_battery() -> Option<u8> {
     for entry in std::fs::read_dir("/sys/class/power_supply").ok()? {
         let path = entry.ok()?.path().join("capacity");
         if let Ok(raw) = std::fs::read_to_string(path) {
             if let Ok(value) = raw.trim().parse::<u32>() {
-                return Some(value.min(100));
+                return Some(value.min(100) as u8);
             }
         }
     }
@@ -359,7 +390,7 @@ fn read_battery() -> Option<u32> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn read_battery() -> Option<u32> {
+fn read_battery() -> Option<u8> {
     None
 }
 
@@ -384,9 +415,28 @@ fn read_battery_charging() -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
+fn bluetooth_active() -> bool {
+    let Ok(entries) = std::fs::read_dir("/sys/class/bluetooth") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("hci") {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+fn bluetooth_active() -> bool {
+    false
+}
+
 /// Used percentage of the filesystem containing the application.
 #[cfg(target_os = "linux")]
-pub fn disk_usage_percent() -> u32 {
+pub fn disk_usage_percent() -> u8 {
     let path = std::ffi::CString::new("/").unwrap_or_default();
     let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
     let result = unsafe { libc::statvfs(path.as_ptr(), &mut stats) };
@@ -396,11 +446,11 @@ pub fn disk_usage_percent() -> u32 {
     let used = stats.f_blocks.saturating_sub(stats.f_bfree);
     ((used as f64 / stats.f_blocks as f64) * 100.0)
         .round()
-        .clamp(0.0, 100.0) as u32
+        .clamp(0.0, 100.0) as u8
 }
 
 #[cfg(windows)]
-pub fn disk_usage_percent() -> u32 {
+pub fn disk_usage_percent() -> u8 {
     use sysinfo::{DiskExt, Disks};
     let disks = Disks::new_with_refreshed_list();
     let disk = disks
@@ -416,7 +466,7 @@ pub fn disk_usage_percent() -> u32 {
                 let used = total.saturating_sub(disk.available_space());
                 ((used as f64 / total as f64) * 100.0)
                     .round()
-                    .clamp(0.0, 100.0) as u32
+                    .clamp(0.0, 100.0) as u8
             }
         }
         None => 0,
@@ -424,7 +474,7 @@ pub fn disk_usage_percent() -> u32 {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-pub fn disk_usage_percent() -> u32 {
+pub fn disk_usage_percent() -> u8 {
     0
 }
 

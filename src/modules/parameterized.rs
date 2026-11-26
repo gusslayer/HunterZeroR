@@ -120,12 +120,16 @@ impl ParameterizedScreen {
                     self.option = (((self.option as i32 + step) % count + count) % count) as usize;
                 }
             }
-            Action::Open => {
+            Action::Open | Action::Start => {
                 if self.selected == 0 {
                     self.target.begin();
                     self.phase = Phase::EditTarget;
                 } else if self.selected == 2 {
-                    self.phase = Phase::Confirm;
+                    if action == Action::Start {
+                        self.start_command(processes);
+                    } else {
+                        self.phase = Phase::Confirm;
+                    }
                 } else if self.selected == self.help_row() {
                     self.phase = Phase::Help;
                 } else if self.selected == self.back_row() {
@@ -167,7 +171,8 @@ impl ToolScreen for ParameterizedScreen {
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match self.phase {
             Phase::EditTarget => {
-                if let Some(EditResult::Saved | EditResult::Cancelled) = self.target.handle(action)
+                if let Some(EditResult::Saved | EditResult::Cancelled) =
+                    self.target.handle(action.as_open())
                 {
                     self.phase = Phase::Settings;
                 }
@@ -176,7 +181,7 @@ impl ToolScreen for ParameterizedScreen {
             Phase::Confirm => {
                 match action {
                     Action::Back => self.phase = Phase::Settings,
-                    Action::Open => self.start_command(processes),
+                    Action::Open | Action::Start => self.start_command(processes),
                     _ => {}
                 }
                 Outcome::Stay
@@ -189,7 +194,7 @@ impl ToolScreen for ParameterizedScreen {
                 Outcome::Stay
             }
             Phase::Result => match action {
-                Action::Open => {
+                Action::Open | Action::Start => {
                     self.phase = Phase::Settings;
                     Outcome::Stay
                 }
@@ -205,7 +210,7 @@ impl ToolScreen for ParameterizedScreen {
                     self.help_scroll.move_by(1);
                     Outcome::Stay
                 }
-                Action::Open => {
+                Action::Open | Action::Start => {
                     self.phase = Phase::Settings;
                     Outcome::Stay
                 }
@@ -231,7 +236,13 @@ impl ToolScreen for ParameterizedScreen {
             draw_help(canvas, self.spec.help, &mut self.help_scroll);
             return;
         }
-        canvas.fill_rect(0, CONTENT_TOP, SCREEN_WIDTH as i32, 184, BG_COLOR);
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
         match self.phase {
             Phase::Settings => {
                 let values = [
@@ -315,25 +326,6 @@ impl ToolScreen for ParameterizedScreen {
                 }
             }
             Phase::EditTarget | Phase::Help => {}
-        }
-    }
-
-    fn footer_hints(&self) -> Vec<(&'static str, i32)> {
-        match self.phase {
-            Phase::EditTarget => vec![
-                ("UP/DOWN DIGITO", 8),
-                ("LEFT/RIGHT IP", 126),
-                ("A GUARDAR", 234),
-            ],
-            Phase::Confirm => vec![("A CONFIRMAR", 12), ("B CANCELAR", 168)],
-            Phase::Running => vec![("B CANCELAR", 12)],
-            Phase::Help => vec![("ARR/ABA TEXTO", 8), ("A VOLVER", 168), ("B SALIR", 240)],
-            Phase::Result => vec![("A OPCIONES", 12), ("B VOLVER", 168)],
-            Phase::Settings => vec![
-                ("UP/DOWN MOVER", 8),
-                ("IZQ/DER AJUSTAR", 118),
-                ("A ABRIR", 250),
-            ],
         }
     }
 

@@ -13,57 +13,64 @@ Fuente de verdad: `src/theme.rs`, `src/gfx.rs`, `src/core/ui.rs`, `src/modules/`
 
 | Rol | Constante | HEX | Uso |
 |---|---|---|---|
-| Fondo | `BG_COLOR` | `#000000` | Fondo, limpieza de áreas, footer |
+| Fondo | `BG_COLOR` | `#000000` | Fondo, limpieza de áreas, HUD |
 | Tinta | `TEXT_COLOR` | `#FFFFFF` | Texto principal, hints, iconos |
-| Acento | `ACCENT_COLOR` | `#FF5500` | Títulos, foco, valor, cursor, progreso |
+| Acento | `ACCENT_COLOR` | `#FF5500` | Títulos, foco, valor, cursor, BT activo |
 | Selección | `SELECTED_BG` | `#3A1400` | Fondo de fila seleccionada |
-| Muted | `MUTED_COLOR` | `#666666` | Secundario, N/D, contador |
+| Muted | `MUTED_COLOR` | `#666666` | Secundario, N/D, desconectado |
 | Panel | `PANEL_COLOR` | `#0C0C0C` | Relleno de marcos/paneles |
 | Borde/grid | `GRID_COLOR` | `#262626` | Bordes 1px, separadores, pista |
-| OK | `SUCCESS_COLOR` | `#78C878` | Estado correcto/conectado |
-| Error | `ERROR_COLOR` | `#FF6E5A` | Error, cancelación, validación |
+| OK | `SUCCESS_COLOR` | `#78C878` | OK, Wi-Fi conectado, batería cargando |
+| Error | `ERROR_COLOR` | `#FF6E5A` | Error, batería <20% descargando |
 
 Usar solo constantes de `theme`; no hardcodear colores en módulos.
 
-## 3. Tipografía (`src/core/font.rs`, `src/gfx.rs`)
+## 3. Tipografía y layout base
 
-- Fuente bitmap 8×8 propia; escala entera (normalmente 1). `draw_text` normaliza a ASCII uppercase.
-- Alineación a píxel entero. Truncar con `draw_text_clipped` (`..`). Envolver con `gfx::wrap_text`.
-- `text_width = chars * 8 * scale`, `text_height = 8 * scale`. Sin kerning ni subpíxel.
-
-## 4. Layout (`src/theme.rs`)
+- Fuente bitmap 8×8 (`src/core/font.rs`), escala entera (normalmente 1), ASCII uppercase. `text_width = chars*8*scale`.
+- Truncar con `draw_text_clipped` (`..`); envolver con `gfx::wrap_text`. Píxeles enteros, sin kerning/subpíxel.
 
 | Zona | Constante | Valor |
 |---|---:|---|
 | Canvas | `SCREEN_WIDTH` × `SCREEN_HEIGHT` | 320 × 240 |
-| Ventana física | `WINDOW_WIDTH` × `WINDOW_HEIGHT` | 640 × 480 |
-| Header | `HEADER_HEIGHT` | 27 px (`y 0..27`) |
-| Content top | `CONTENT_TOP` | 28 |
-| Content bottom | `CONTENT_BOTTOM` | 211 |
-| Content height | `CONTENT_HEIGHT` | 183 px |
-| Footer top/alto | `FOOTER_TOP` / `FOOTER_HEIGHT` | 211 / 29 px |
+| Ventana | `WINDOW_WIDTH` × `WINDOW_HEIGHT` | 640 × 480 |
+| Header global | `HEADER_HEIGHT` | 27 px (`y 0..27`) |
+| Content | `CONTENT_TOP..CONTENT_BOTTOM` | `28..211` (183 px) |
+| Footer global | `FOOTER_TOP` / `FOOTER_HEIGHT` | `211 / 29 px` (`y 211..240`) |
 | FPS | `FPS` | 15 |
 
-Los módulos dibujan solo en `CONTENT_TOP..CONTENT_BOTTOM`. No dibujar header/footer propios ni escribir fuera del canvas.
+## 4. Header global fijo (`src/core/ui.rs::draw_global_header`)
 
-## 5. Componentes reutilizables (`src/core/ui.rs`)
+Dibujado solo por `src/main.rs`. Limpia `0..320, 0..27` con `BG_COLOR`; línea inferior 1px en `y=26` con `GRID_COLOR`.
+Indicadores en `y=6` (icono 14×14 + texto 8px centrado verticalmente):
 
-- **Filas/listas**: `ScrollState` + `draw_row`. Selección: `SELECTED_BG`, borde `ACCENT`, barra izquierda 3px, chevron.
-- **Scroll**: `draw_scroll_indicator`; `ScrollState::move_by` con wrap-around y clamp.
-- **Ayuda**: `HelpSection { heading, paragraphs }` + `draw_help(canvas, sections, &mut ScrollState)`. El módulo solo provee `static HELP`.
-- **Marcos/paneles**: `draw_frame(..., Some(PANEL_COLOR))`, borde `GRID_COLOR`, esquinas con ticks.
-- **Progreso/métrica**: `draw_meter` (0..100, 4 segmentos). Barras indeterminadas solo con estado propio y tiempo real.
+| X | Icono | Texto / color |
+|---:|---|---|
+| 4 | `cpu` | `{cpu_percent}%` |
+| 60 | `memory` | `{ram_percent}%` |
+| 116 | `disk` | `{disk_percent}%` |
+| 176 | `wifi` | `SUCCESS_COLOR` si conectado, `MUTED_COLOR` si no |
+| 200 | `bluetooth` | `ACCENT_COLOR` si activo, `MUTED_COLOR` si apagado |
+| 228 | `battery` | `+` si `battery_charging`; `{battery_percent}%` o `N/D` `MUTED_COLOR`; `SUCCESS_COLOR` cargando, `ERROR_COLOR` si `<20%` descargando, si no `TEXT_COLOR` |
+
+`SystemStats` provee valores cacheados/no bloqueantes: `cpu_percent:u8`, `ram_percent:u8`, `disk_percent:u8`, `wifi_connected:bool`, `bluetooth_active:bool`, `battery_percent:Option<u8>`, `battery_charging:bool`.
+
+## 5. Footer global fijo (`src/core/ui.rs::draw_global_footer`)
+
+Dibujado solo por `src/main.rs`, `y 211..240`, fondo `BG_COLOR`, línea superior `GRID_COLOR`. Hints fijos:
+`D-PAD Mover` (x=4), `A Abrir` (x=116), `START Ejecutar` (x=188), `B Volver` (x=272). Los módulos no dibujan footer ni exponen `footer_hints`.
+
+## 6. Componentes reutilizables (`src/core/ui.rs`)
+
+- **Listas**: `ScrollState` + `draw_row` (selección `SELECTED_BG`, borde `ACCENT`, barra 3px, chevron).
+- **Ayuda**: `HelpSection` + `draw_help`; módulo solo provee `static HELP`.
+- **Marcos/métrica**: `draw_frame(..., Some(PANEL_COLOR))`, `draw_meter` 0..100 (4 segmentos).
 - **Editores**: `Ipv4Editor`, `MacEditor`, `HostnameEditor`; validar con `core::validation`.
-- **Iconos**: `draw_icon` usa primitivas 14×14; assets SVG en `assets/icons/` (24 iconos) con fallback por nombre.
-- **Footer**: 4 hints `[(&str, i32)]`; formato base menú: `D-PAD Mover`, `A Abrir`, `START Ejecutar`, `B Volver`.
+- **Iconos**: `draw_icon` primitivas 14×14; fallback por nombre; assets `assets/icons/` (24 SVG).
+- **Logs**: `LogsScreen` (`id: logs`, icono `file`) lee `logs/app.log` y `logs/commands/latest.log`; `A` alterna, `START` vacía log actual, `D-PAD` scroll, `B` vuelve.
 
-## 6. Entrada y movimiento
+## 7. Entrada y reglas
 
-- Entrada normalizada: `core::input::Action::{Up,Down,Left,Right,Open,Back,Start,Quit}`.
-- `Action::Start.as_open() => Open` dentro de módulos. `Back` vuelve/cancela; no sale de la app. `Quit` lo maneja el loop principal.
-- Debounce: 80 ms (`Debouncer`). Animaciones/movimiento: enteros, no bloqueantes, compatibles con 15 FPS; transiciones instantáneas por defecto.
-
-## 7. Reglas Do / Don't
-
-- **Do**: reutilizar `gfx::Canvas`, `theme`, `core::ui`; mantener píxeles enteros; usar `ScrollState`; limpiar área útil; exponer ayuda estática.
-- **Don't**: no añadir dependencias gráficas pesadas; no dibujar fuera de content; no hardcodear paleta/layout; no crear widgets duplicados por módulo; no bloquear el loop de render/input.
+- `Action::{Up,Down,Left,Right,Open,Back,Start,Quit}`; `Start.as_open() => Open`; `Back` vuelve; `Quit` solo en main loop. Debounce 80 ms.
+- **Do**: reutilizar `gfx`, `theme`, `core::ui`; píxeles enteros; dibujar solo en content; exponer ayuda estática.
+- **Don't**: no dibujar header/footer en módulos; no hardcodear paleta/layout; no deps gráficas pesadas; no bloquear render/input.

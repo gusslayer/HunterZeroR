@@ -2,7 +2,6 @@
 //!
 //! Rendering targets a 320x240 virtual canvas; a platform backend scales it to
 //! the physical display (2x nearest neighbour on the 640x480 framebuffer).
-//! No SDL, no OpenGL/GLES, no Python. See `DESIGN.md` and `AGENTS.md`.
 
 mod core;
 mod gfx;
@@ -10,6 +9,7 @@ mod modules;
 mod platform;
 mod theme;
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -17,24 +17,17 @@ use crate::core::input::Action;
 use crate::core::plugins::MODULES;
 use crate::core::process_manager::ProcessManager;
 use crate::core::system_stats::{StatsReader, SystemStats};
-use crate::core::ui::{draw_row, ScrollState};
+use crate::core::ui::{draw_global_footer, draw_global_header, draw_row, ScrollState};
 use crate::gfx::Canvas;
 use crate::modules::{Outcome, ToolScreen};
 use crate::theme::{
-    ACCENT_COLOR, BG_COLOR, CONTENT_BOTTOM, CONTENT_TOP, FOOTER_TOP, FPS, GRID_COLOR, MUTED_COLOR,
-    SCREEN_HEIGHT, SCREEN_WIDTH, TEXT_COLOR,
+    ACCENT_COLOR, BG_COLOR, CONTENT_BOTTOM, CONTENT_HEIGHT, CONTENT_TOP, ERROR_COLOR, FPS,
+    MUTED_COLOR, SCREEN_WIDTH,
 };
-
-/// Fixed footer hints shown in the main menu (see `DESIGN.md`).
-const FOOTER_HINTS: [(&str, i32); 4] = [
-    ("D-PAD Mover", 4),
-    ("A Abrir", 116),
-    ("START Ejecutar", 188),
-    ("B Volver", 272),
-];
 
 const MENU_ROW_HEIGHT: i32 = 19;
 const MENU_TOP: i32 = CONTENT_TOP + 18;
+const ALERT_DURATION: Duration = Duration::from_secs(3);
 
 enum Screen {
     Menu,
@@ -77,6 +70,7 @@ fn run(root: &Path) -> Result<(), String> {
     let mut screen = Screen::Menu;
     let mut menu = ScrollState::new(menu_capacity());
     menu.update(MODULES.len(), None);
+    let mut alert: Option<(String, Instant)> = None;
 
     let frame = Duration::from_nanos(1_000_000_000 / u64::from(FPS.max(1)));
     let mut next_frame = Instant::now();
@@ -101,15 +95,23 @@ fn run(root: &Path) -> Result<(), String> {
                 handle_menu(action.as_open(), &mut menu, &mut screen, root);
             } else {
                 let mut close_module = false;
+                let mut panic_error = None;
                 if let Screen::Module(module) = &mut screen {
-                    match module.handle(action.as_open(), &mut processes) {
-                        Outcome::Stay => {}
-                        Outcome::Close => close_module = true,
+                    let result =
+                        catch_unwind(AssertUnwindSafe(|| module.handle(action, &mut processes)));
+                    match result {
+                        Ok(Outcome::Stay) => {}
+                        Ok(Outcome::Close) => close_module = true,
+                        Err(_) => panic_error = Some("handle"),
                     }
                 }
-                if close_module {
+                if let Some(stage) = panic_error {
+                    recover_module(&mut screen, &mut processes, &mut alert, stage);
+                } else if close_module {
                     if let Screen::Module(module) = &mut screen {
-                        module.close(&mut processes);
+                        let _ = catch_unwind(AssertUnwindSafe(|| {
+                            module.close(&mut processes);
+                        }));
                     }
                     screen = Screen::Menu;
                 }
@@ -117,10 +119,22 @@ fn run(root: &Path) -> Result<(), String> {
         }
 
         if let Screen::Module(module) = &mut screen {
-            module.sync(&mut processes);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                module.sync(&mut processes);
+            }));
+            if result.is_err() {
+                recover_module(&mut screen, &mut processes, &mut alert, "sync");
+            }
         }
 
-        render(&mut canvas, &mut screen, &menu, &processes, &stats);
+        render(
+            &mut canvas,
+            &mut screen,
+            &menu,
+            &mut processes,
+            &stats,
+            &mut alert,
+        );
 
         if let Err(error) = backend.present(&canvas) {
             crate::core::logging::event("WARN", "platform", &format!("present: {error}"));
@@ -136,9 +150,31 @@ fn run(root: &Path) -> Result<(), String> {
     }
 
     if let Screen::Module(module) = &mut screen {
-        module.close(&mut processes);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            module.close(&mut processes);
+        }));
     }
     Ok(())
+}
+
+fn recover_module(
+    screen: &mut Screen,
+    processes: &mut ProcessManager,
+    alert: &mut Option<(String, Instant)>,
+    stage: &str,
+) {
+    processes.stop();
+    crate::core::logging::event("ERROR", "app", &format!("module panic during {stage}"));
+    if let Screen::Module(module) = screen {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            module.close(processes);
+        }));
+    }
+    *screen = Screen::Menu;
+    *alert = Some((
+        "ERROR DE MODULO. VOLVIENDO AL MENU.".to_string(),
+        Instant::now(),
+    ));
 }
 
 fn handle_menu(action: Action, menu: &mut ScrollState, screen: &mut Screen, root: &Path) {
@@ -160,17 +196,60 @@ fn render(
     canvas: &mut Canvas,
     screen: &mut Screen,
     menu: &ScrollState,
-    processes: &ProcessManager,
+    processes: &mut ProcessManager,
     stats: &SystemStats,
+    alert: &mut Option<(String, Instant)>,
 ) {
     canvas.clear(BG_COLOR);
+    // Always clear content area before module draw to avoid visual corruption.
+    canvas.fill_rect(
+        0,
+        CONTENT_TOP,
+        SCREEN_WIDTH as i32,
+        CONTENT_HEIGHT,
+        BG_COLOR,
+    );
 
+    let mut draw_panic = false;
     match screen {
         Screen::Menu => draw_menu(canvas, menu),
-        Screen::Module(module) => module.draw(canvas, processes, stats),
+        Screen::Module(module) => {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                module.draw(canvas, processes, stats);
+            }));
+            if result.is_err() {
+                draw_panic = true;
+            }
+        }
     }
 
-    draw_footer(canvas, &*screen);
+    if draw_panic {
+        recover_module(screen, processes, alert, "draw");
+        canvas.fill_rect(
+            0,
+            CONTENT_TOP,
+            SCREEN_WIDTH as i32,
+            CONTENT_HEIGHT,
+            BG_COLOR,
+        );
+        draw_menu(canvas, menu);
+    }
+
+    draw_alert(canvas, alert);
+    // Global HUD always drawn last to prevent corruption/overwrite.
+    draw_global_header(canvas, stats);
+    draw_global_footer(canvas);
+}
+
+fn draw_alert(canvas: &mut Canvas, alert: &mut Option<(String, Instant)>) {
+    let Some((message, at)) = alert.as_ref() else {
+        return;
+    };
+    if at.elapsed() > ALERT_DURATION {
+        *alert = None;
+        return;
+    }
+    canvas.draw_text_clipped(message, 16, CONTENT_BOTTOM - 14, 288, ERROR_COLOR, 1);
 }
 
 fn draw_menu(canvas: &mut Canvas, menu: &ScrollState) {
@@ -200,31 +279,6 @@ fn draw_menu(canvas: &mut Canvas, menu: &ScrollState) {
         MUTED_COLOR,
         1,
     );
-}
-
-fn draw_footer(canvas: &mut Canvas, screen: &Screen) {
-    canvas.fill_rect(
-        0,
-        FOOTER_TOP,
-        SCREEN_WIDTH as i32,
-        SCREEN_HEIGHT as i32 - FOOTER_TOP,
-        BG_COLOR,
-    );
-    canvas.hline(0, SCREEN_WIDTH as i32 - 1, FOOTER_TOP, GRID_COLOR);
-    let hints: Vec<(&str, i32)> = match screen {
-        Screen::Menu => FOOTER_HINTS.iter().map(|(text, x)| (*text, *x)).collect(),
-        Screen::Module(module) => module.footer_hints(),
-    };
-    for (text, x) in hints {
-        canvas.draw_text_clipped(
-            text,
-            x,
-            FOOTER_TOP + 11,
-            SCREEN_WIDTH as i32 - x - 2,
-            TEXT_COLOR,
-            1,
-        );
-    }
 }
 
 fn menu_capacity() -> usize {
