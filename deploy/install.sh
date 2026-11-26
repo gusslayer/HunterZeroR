@@ -13,7 +13,7 @@ sudo apt-get upgrade -y
 
 # 2. Instalar dependencias del sistema para módulos
 echo "Instalando dependencias del sistema..."
-sudo apt-get install -y nmap dnsutils bluetooth-tools
+sudo apt-get install -y nmap dnsutils bluez
 
 # 3. Configurar config.txt para GPi CASE 2W
 echo "Configurando pantalla GPi CASE 2W..."
