@@ -468,7 +468,7 @@ impl WifiSurveyScreen {
             return;
         }
         let y0 = 70;
-        let max_rows = 3;
+        let max_rows: usize = 3;
         if self.scan_entries.is_empty() {
             canvas.draw_text_clipped(
                 "SCAN: SIN REDES  START=REESCANEAR",
