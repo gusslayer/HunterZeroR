@@ -121,8 +121,13 @@ ensure_rust() {
 write_display_config() {
   log "Configurando pantalla GPi CASE 2W..."
   local config_backup="${CONFIG_DST}.backup.$(date +%Y%m%d%H%M%S)"
-  local block
-  block=$(cat <<'EOF'
+
+  if [[ -f "$CONFIG_DST" ]]; then
+    as_root cp "$CONFIG_DST" "$config_backup"
+    log "Backup de config.txt creado: $config_backup"
+
+    if ! grep -q "dtoverlay=vc4-kms-dpi-generic" "$CONFIG_DST" 2>/dev/null; then
+      as_root tee -a "$CONFIG_DST" >/dev/null <<'EOF'
 
 # Agregado por HunterZero-Rust installer
 
@@ -133,16 +138,29 @@ dtparam=vactive=480,vfp=18,vsync=9,vbp=18
 dtparam=clock-frequency=24000000,rgb666-padhi
 dtparam=width-mm=60,height-mm=45
 EOF
-)
-
-  if [[ -f "$CONFIG_DST" ]]; then
-    as_root cp "$CONFIG_DST" "$config_backup"
-    log "Backup de config.txt creado: $config_backup"
-    if grep -q "dtoverlay=vc4-kms-dpi-generic" "$CONFIG_DST" 2>/dev/null; then
-      log "Configuración de pantalla ya presente, omitiendo..."
-    else
-      printf '%s\n' "$block" | as_root tee -a "$CONFIG_DST" >/dev/null
       log "Configuración de pantalla agregada a config.txt existente"
+    else
+      log "Configuración de pantalla ya presente."
+    fi
+
+    if ! grep -qE '^[[:space:]]*gpio=27=op,dh' "$CONFIG_DST" 2>/dev/null; then
+      as_root tee -a "$CONFIG_DST" >/dev/null <<'EOF'
+
+# HunterZero-Rust safe shutdown GPIO
+gpio=27=op,dh
+gpio=26=ip,pu
+EOF
+      log "GPIO de apagado seguro agregado a config.txt"
+    fi
+
+    if ! grep -qE '^[[:space:]]*dtparam=audio=on' "$CONFIG_DST" 2>/dev/null; then
+      as_root tee -a "$CONFIG_DST" >/dev/null <<'EOF'
+
+# Audio GPi CASE 2W
+dtparam=audio=on
+audio_pwm_mode=2
+EOF
+      log "Configuración de audio agregada a config.txt"
     fi
   else
     log "Creando nuevo config.txt..."
@@ -151,14 +169,81 @@ EOF
       as_root cp "$CONFIG_SRC" "$CONFIG_DST"
     else
       as_root tee "$CONFIG_DST" >/dev/null <<'EOF'
-# HunterZero-Rust - Raspberry Pi Zero W v1.1 + GPi CASE 2W
+# HunterZero-Rust: configuración de pantalla DPI para GPi Case 2W.
+# Instalada por deploy/install.sh en /boot/firmware/config.txt (Raspberry Pi OS Trixie).
+# El archivo original se conserva en /boot/firmware/config.txt.hunterzero.bak
+
+# For more options and information see
+# http://rptl.io/configtxt
+# Some settings may impact device functionality. See link above for details
+
+# Uncomment some or all of these to enable the optional hardware interfaces
+#dtparam=i2c_arm=on
+#dtparam=i2s=on
+#dtparam=spi=on
+
+# Enable audio (loads snd_bcm2835)
+dtparam=audio=on
+
+# Additional overlays and parameters are documented
+# /boot/firmware/overlays/README
+
+# Automatically load overlays for detected cameras
+camera_auto_detect=1
+
+# Automatically load overlays for detected DSI displays
+# display_auto_detect=1
+
+# Automatically load initramfs files, if found
+auto_initramfs=1
+
+# Enable DRM VC4 V3D driver
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# Don't have the firmware create an initial video= setting in cmdline.txt.
+# Use the kernel's default instead.
+disable_fw_kms_setup=1
+
+# Disable compensation for displays with overscan
+#disable_overscan=1
+
+# Run as fast as firmware / board allows
+arm_boost=1
+
+[cm4]
+# Enable host mode on the 2711 built-in XHCI USB controller.
+# This line should be removed if the legacy DWC2 controller is required
+# (e.g. for USB device mode) or if USB support is not required.
+otg_mode=1
+
+[cm5]
+dtoverlay=dwc2,dr_mode=host
+
+[pi5]
+dtoverlay=nospi10
+
+[all]
 
 # --- Retroflag GPi CASE 2W Configuración unificada ---
+
+# 1. Pantalla (usando superposiciones integradas del sistema)
 dtoverlay=vc4-kms-dpi-generic
 dtparam=hactive=640,hfp=70,hsync=40,hbp=22
 dtparam=vactive=480,vfp=18,vsync=9,vbp=18
 dtparam=clock-frequency=24000000,rgb666-padhi
 dtparam=width-mm=60,height-mm=45
+
+# 2. Apagado seguro (GPIO 26/27)
+# No se usa dtoverlay=gpio-shutdown ni gpio-led: ambos reclamarían las líneas
+# 26/27 y evitarían que hunterzero-poweroff.service las controle. El servicio
+# mantiene GPIO 27 en alto (power enable) y apaga con el botón físico en GPIO 26.
+gpio=27=op,dh
+gpio=26=ip,pu
+
+# 3. Audio (primero prueba el PWM predeterminado; si no funciona, cambia a audremap)
+dtparam=audio=on
+audio_pwm_mode=2
 EOF
     fi
     log "config.txt creado en $CONFIG_DST"
@@ -302,71 +387,123 @@ install_poweroff_service() {
     printf '\n# HunterZero-Rust safe shutdown GPIO\ngpio=27=op,dh\ngpio=26=ip,pu\n' | as_root tee -a "$CONFIG_DST" >/dev/null
     log "Líneas GPIO de apagado seguro agregadas a config.txt"
   fi
-  as_root tee /usr/local/bin/hunterzero-poweroff.sh >/dev/null <<'POWEROFF'
-#!/bin/bash
-# HunterZero safe shutdown for Retroflag GPi Case 2W.
-# GPIO27 = power latch (output, high). GPIO26 = power button (input, active low).
-set -eu
 
-if command -v pinctrl >/dev/null 2>&1; then
-  pinctrl set 27 op dh
-  pinctrl set 26 ip pu
-  while true; do
-    state="$(pinctrl get 26 2>/dev/null || true)"
-    case "$state" in
-      *"lo"*|*"dl"*|*"level=0"*)
-        /sbin/shutdown -h now "HunterZero safe shutdown"
-        exit 0
-        ;;
-    esac
-    sleep 1
-  done
-elif command -v raspi-gpio >/dev/null 2>&1; then
-  raspi-gpio set 27 op dh
-  raspi-gpio set 26 ip pu
-  while true; do
-    state="$(raspi-gpio get 26 2>/dev/null || true)"
-    case "$state" in
-      *"level=0"*)
-        /sbin/shutdown -h now "HunterZero safe shutdown"
-        exit 0
-        ;;
-    esac
-    sleep 1
-  done
-else
-  echo "No GPIO tool found (pinctrl/raspi-gpio)" >&2
-  exit 1
+  as_root tee /usr/local/bin/hunterzero-poweroff >/dev/null <<'POWEROFF'
+#!/usr/bin/env bash
+# Apagado físico de la GPi Case 2W con libgpiod.
+# GPIO 27 mantiene el latch de alimentación en alto; GPIO 26 detecta el botón
+# de encendido (activo en bajo). Al detectar el flanco descendente se ejecuta
+# un apagado limpio.
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
 fi
-POWEROFF
-  as_root chmod +x /usr/local/bin/hunterzero-poweroff.sh
+set -euo pipefail
 
-  if ! require_cmd pinctrl && ! require_cmd raspi-gpio; then
-    warn "No hay pinctrl ni raspi-gpio; hunterzero-poweroff.service no se habilitará."
+GPIO_CHIP="${HUNTERZERO_GPIO_CHIP:-gpiochip0}"
+POWER_BUTTON_LINE="${HUNTERZERO_POWER_BUTTON_LINE:-26}"
+POWER_ENABLE_LINE="${HUNTERZERO_POWER_ENABLE_LINE:-27}"
+CONSUMER="hunterzero-poweroff"
+SHUTDOWN_BIN="${HUNTERZERO_SHUTDOWN_BIN:-/usr/sbin/shutdown}"
+
+for tool in gpioset gpiomon; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Falta $tool; instala el paquete gpiod." >&2
+        exit 1
+    fi
+done
+
+if [[ "$GPIO_CHIP" == /* ]]; then
+    chip_device="$GPIO_CHIP"
+else
+    chip_device="/dev/$GPIO_CHIP"
+fi
+if [[ ! -e "$chip_device" ]]; then
+    echo "No existe $chip_device; no se puede vigilar el botón de encendido." >&2
+    exit 1
+fi
+if [[ ! -x "$SHUTDOWN_BIN" ]]; then
+    echo "No existe $SHUTDOWN_BIN; no se puede apagar el equipo." >&2
+    exit 1
+fi
+
+echo "Manteniendo GPIO $POWER_ENABLE_LINE en alto y esperando GPIO $POWER_BUTTON_LINE..."
+
+# gpioset mantiene el nivel alto mientras el proceso viva. Si muere,
+# wait -n lo detecta y systemd reinicia el servicio.
+gpioset -c "$GPIO_CHIP" -C "$CONSUMER" "$POWER_ENABLE_LINE=1" &
+enable_pid=$!
+
+if command -v gpioget >/dev/null 2>&1; then
+    initial_level="$(gpioget -c "$GPIO_CHIP" -C "$CONSUMER" "$POWER_BUTTON_LINE" 2>&1 || true)"
+    echo "GPIO $POWER_BUTTON_LINE al iniciar: $initial_level"
+fi
+
+gpiomon -c "$GPIO_CHIP" -C "$CONSUMER" -e falling -b pull-up -p 100ms -n 1 \
+    "$POWER_BUTTON_LINE" &
+monitor_pid=$!
+echo "Vigilando flanco descendente en GPIO $POWER_BUTTON_LINE (chip $GPIO_CHIP)."
+
+cleanup() {
+    kill "$enable_pid" "$monitor_pid" 2>/dev/null || true
+    wait "$enable_pid" "$monitor_pid" 2>/dev/null || true
+}
+on_signal() {
+    cleanup
+    exit 0
+}
+trap cleanup EXIT
+trap on_signal INT TERM
+
+set +e
+wait -n -p finished_pid "$enable_pid" "$monitor_pid"
+finished_status=$?
+set -e
+
+if [[ "${finished_pid:-}" != "$monitor_pid" || "$finished_status" -ne 0 ]]; then
+    echo "Falló la vigilancia GPIO (proceso ${finished_pid:-desconocido}, código $finished_status)." >&2
+    exit 1
+fi
+
+echo "Botón de encendido pulsado: apagando el equipo."
+sync
+"$SHUTDOWN_BIN" -h now
+POWEROFF
+  as_root chmod +x /usr/local/bin/hunterzero-poweroff
+
+  if ! require_cmd gpioset || ! require_cmd gpiomon; then
+    warn "Falta gpiod (gpioset/gpiomon); hunterzero-poweroff.service no se habilitará."
+    warn "Instala con: sudo apt-get install -y gpiod"
     return 0
   fi
 
   as_root tee /etc/systemd/system/hunterzero-poweroff.service >/dev/null <<'EOF'
 [Unit]
-Description=HunterZero Safe Shutdown (GPi Case 2W)
-After=local-fs.target
-Before=multi-user.target
+Description=HunterZero GPi physical power button (GPIO 26)
+# Permite reintentos infinitos si el chip GPIO aún no está listo al arrancar.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/hunterzero-poweroff.sh
-Restart=on-failure
-RestartSec=2
 User=root
+ExecStart=/usr/local/bin/hunterzero-poweroff
+# Reinicia también tras una salida limpia: si el monitor se detiene por cualquier
+# motivo, el botón físico debe seguir operativo sin intervención manual.
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
   as_root systemctl daemon-reload
-  as_root systemctl enable hunterzero-poweroff.service
-  as_root systemctl restart hunterzero-poweroff.service ||
-    warn "No se pudo iniciar hunterzero-poweroff.service; revisa 'systemctl status hunterzero-poweroff'."
-  log "Servicio hunterzero-poweroff.service habilitado."
+  if [[ -e /dev/gpiochip0 ]]; then
+    as_root systemctl enable --now hunterzero-poweroff.service ||
+      warn "No se pudo iniciar hunterzero-poweroff.service; revisa 'systemctl status hunterzero-poweroff'."
+    log "Servicio hunterzero-poweroff.service habilitado."
+  else
+    warn "No existe /dev/gpiochip0; no se habilitó el apagado por GPIO."
+  fi
 }
 
 install_service() {
@@ -414,12 +551,14 @@ main() {
     iputils-ping \
     alsa-utils \
     iw \
-    rfkill
+    rfkill \
+    gpiod
 
-  log "Instalando utilidades GPIO para apagado seguro..."
-  as_root apt-get install -y --no-install-recommends raspi-utils ||
-    as_root apt-get install -y --no-install-recommends raspi-gpio ||
-    warn "No se pudo instalar pinctrl/raspi-gpio; el apagado seguro GPIO quedará deshabilitado."
+  log "Verificando utilidades GPIO para apagado seguro..."
+  if ! require_cmd gpioset || ! require_cmd gpiomon; then
+    as_root apt-get install -y --no-install-recommends gpiod ||
+      warn "No se pudo instalar gpiod; el apagado seguro GPIO quedará deshabilitado."
+  fi
 
   write_display_config
   install_poweroff_service
@@ -437,10 +576,10 @@ main() {
       warn "  Falta comando runtime: $cmd"
     fi
   done
-  if require_cmd pinctrl || require_cmd raspi-gpio; then
-    log "  OK: GPIO tool (pinctrl/raspi-gpio)"
+  if require_cmd gpioset && require_cmd gpiomon; then
+    log "  OK: gpiod (gpioset/gpiomon)"
   else
-    warn "  Falta pinctrl/raspi-gpio: apagado seguro GPIO deshabilitado."
+    warn "  Falta gpiod (gpioset/gpiomon): apagado seguro GPIO deshabilitado."
   fi
 
   log "Verificando estado Wi-Fi/Bluetooth..."
