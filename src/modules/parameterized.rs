@@ -346,7 +346,15 @@ impl ToolScreen for ParameterizedScreen {
                 let available_h = CONTENT_BOTTOM - 2 - help_y;
                 if available_h >= 28 {
                     let help_h = available_h.clamp(28, 59);
-                    draw_frame(canvas, 10, help_y, 300, help_h, GRID_COLOR, Some(PANEL_COLOR));
+                    draw_frame(
+                        canvas,
+                        10,
+                        help_y,
+                        300,
+                        help_h,
+                        GRID_COLOR,
+                        Some(PANEL_COLOR),
+                    );
                     canvas.draw_text("AYUDA RAPIDA", 16, help_y + 4, ACCENT_COLOR, 1);
                     let tip = self
                         .spec
