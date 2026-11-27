@@ -17,6 +17,7 @@ pub const UPDATE_LABEL: &str = "Actualizacion de HunterZero";
 pub const UPDATE_DEPENDENCY_HINT: &str =
     "Si falta una dependencia, ejecuta: sudo bash deploy/deps.sh.";
 pub const MAX_COMMAND_TIMEOUT_SECONDS: u64 = 180;
+pub const UPDATE_TIMEOUT_SECONDS: u64 = 1800;
 const MAX_DISPLAY_OUTPUT: usize = 8192;
 const MAX_DISPLAY_LINES: usize = 24;
 
@@ -85,7 +86,7 @@ impl ProcessManager {
         self.launch(
             UPDATE_LABEL,
             &command,
-            MAX_COMMAND_TIMEOUT_SECONDS,
+            UPDATE_TIMEOUT_SECONDS,
             "No esta instalado bash; no se puede actualizar ahora.".to_string(),
             Some(("HUNTERZERO_UPDATE_GUI", "1")),
         )

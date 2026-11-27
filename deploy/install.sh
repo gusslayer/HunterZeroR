@@ -2,6 +2,14 @@
 # HunterZero-Rust Installation Script
 # Script de instalación para Raspberry Pi Zero W v1.1 con GPi CASE 2W
 
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  fi
+  echo "[HunterZero][ERROR] Este script requiere bash. Ejecuta: bash $0" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 APP_DIR="/opt/hunterzero-rust"
