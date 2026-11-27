@@ -388,20 +388,14 @@ pub fn draw_global_footer(canvas: &mut Canvas) {
     canvas.fill_rect(0, FOOTER_TOP, SCREEN_WIDTH as i32, FOOTER_HEIGHT, BG_COLOR);
     canvas.hline(0, SCREEN_WIDTH as i32 - 1, FOOTER_TOP, GRID_COLOR);
     let hints = [
-        ("D-PAD Mover", 4),
-        ("A Abrir", 116),
-        ("START Ejecutar", 188),
-        ("B Volver", 272),
+        ("DPAD Mover", 4),
+        ("A Abrir", 96),
+        ("START Ok", 172),
+        ("B Volver", 252),
     ];
     for (text, x) in hints {
-        canvas.draw_text_clipped(
-            text,
-            x,
-            FOOTER_TOP + 11,
-            SCREEN_WIDTH as i32 - x - 2,
-            TEXT_COLOR,
-            1,
-        );
+        let max_w = (SCREEN_WIDTH as i32 - x - 4).max(0);
+        canvas.draw_text_clipped(text, x, FOOTER_TOP + 11, max_w, TEXT_COLOR, 1);
     }
 }
 
