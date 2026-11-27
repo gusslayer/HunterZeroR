@@ -275,48 +275,30 @@ impl ToolScreen for ParameterizedScreen {
         );
         match self.phase {
             Phase::Settings => {
-                let option_display = if self.spec.option_multi {
-                    self.spec
-                        .option_values
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| {
-                            let on = self.option_toggles.get(i).copied().unwrap_or(false);
-                            let mark = if on { "x" } else { " " };
-                            let focus = if i == self.option { ">" } else { " " };
-                            format!("{focus}[{mark}]{}", name)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                } else {
-                    self.option_value().unwrap_or_default()
-                };
-                let values = [
-                    self.target.address(),
-                    self.parameter.to_string(),
-                    option_display,
-                ];
+                let mut y = 32;
+                let mut multi_block_bottom = 0i32;
                 for (index, label) in self.rows.iter().enumerate() {
-                    let y = 32 + index as i32 * 19;
                     let is_multi_option =
                         self.spec.option_multi && !self.spec.option_values.is_empty() && index == 3;
                     if is_multi_option {
                         let selected = index == self.selected;
+                        let option_count = self.spec.option_values.len() as i32;
+                        let block_h = 17 + option_count * 13;
                         if selected {
-                            canvas.fill_rect(12, y, 296, 17, SELECTED_BG);
-                            canvas.stroke_rect(12, y, 296, 17, ACCENT_COLOR);
-                            canvas.fill_rect(12, y, 3, 17, ACCENT_COLOR);
+                            canvas.fill_rect(12, y, 296, block_h, SELECTED_BG);
+                            canvas.stroke_rect(12, y, 296, block_h, ACCENT_COLOR);
+                            canvas.fill_rect(12, y, 3, block_h, ACCENT_COLOR);
                         }
                         canvas.draw_text_clipped(
                             &crate::core::font::plain_text(label).to_ascii_uppercase(),
                             19,
                             y + 4,
-                            90,
+                            140,
                             TEXT_COLOR,
                             1,
                         );
-                        let mut x = 114;
                         for (i, name) in self.spec.option_values.iter().enumerate() {
+                            let oy = y + 17 + i as i32 * 13;
                             let on = self.option_toggles.get(i).copied().unwrap_or(false);
                             let focused = i == self.option;
                             let marker = if on { "[X]" } else { "[ ]" };
@@ -327,22 +309,24 @@ impl ToolScreen for ParameterizedScreen {
                             } else {
                                 MUTED_COLOR
                             };
-                            let item = format!("{marker}{name}");
-                            canvas.draw_text_clipped(&item, x, y + 4, 60, color, 1);
-                            x += crate::core::font::text_width(&item, 1) + 4;
+                            let prefix = if focused && selected { "> " } else { "  " };
+                            let item = format!("{prefix}{marker} {name}");
+                            canvas.draw_text_clipped(&item, 24, oy, 270, color, 1);
                         }
                         if selected {
                             draw_chevron(canvas, 295, y + 3, 9, 11, ACCENT_COLOR);
                         }
+                        y += block_h + 2;
+                        multi_block_bottom = y;
                     } else {
                         let value = match index {
-                            0 => values[0].as_str(),
-                            1 => values[1].as_str(),
-                            2 => "",
+                            0 => self.target.address(),
+                            1 => self.parameter.to_string(),
+                            2 => String::new(),
                             _ if !self.spec.option_values.is_empty() && index == 3 => {
-                                values[2].as_str()
+                                self.option_value().unwrap_or_default()
                             }
-                            _ => "",
+                            _ => String::new(),
                         };
                         draw_row(
                             canvas,
@@ -351,23 +335,30 @@ impl ToolScreen for ParameterizedScreen {
                             296,
                             17,
                             label,
-                            value,
+                            &value,
                             index == self.selected,
                             None,
                         );
+                        y += 19;
                     }
                 }
-                draw_frame(canvas, 10, 150, 300, 59, GRID_COLOR, Some(PANEL_COLOR));
-                canvas.draw_text("AYUDA RAPIDA", 16, 154, ACCENT_COLOR, 1);
-                let tip = self
-                    .spec
-                    .help
-                    .first()
-                    .and_then(|section| section.paragraphs.first())
-                    .copied()
-                    .unwrap_or("");
-                for (index, line) in wrap_text(tip, 34).iter().take(2).enumerate() {
-                    canvas.draw_text(line, 16, 165 + index as i32 * 11, TEXT_COLOR, 1);
+                let help_y = if multi_block_bottom > 0 { y + 1 } else { 150 };
+                let available_h = CONTENT_BOTTOM - 2 - help_y;
+                if available_h >= 28 {
+                    let help_h = available_h.clamp(28, 59);
+                    draw_frame(canvas, 10, help_y, 300, help_h, GRID_COLOR, Some(PANEL_COLOR));
+                    canvas.draw_text("AYUDA RAPIDA", 16, help_y + 4, ACCENT_COLOR, 1);
+                    let tip = self
+                        .spec
+                        .help
+                        .first()
+                        .and_then(|section| section.paragraphs.first())
+                        .copied()
+                        .unwrap_or("");
+                    let max_lines = ((help_h - 16) / 11).max(1) as usize;
+                    for (index, line) in wrap_text(tip, 34).iter().take(max_lines).enumerate() {
+                        canvas.draw_text(line, 16, help_y + 15 + index as i32 * 11, TEXT_COLOR, 1);
+                    }
                 }
             }
             Phase::Confirm => {

@@ -26,7 +26,7 @@ use crate::theme::{
 };
 
 const MENU_ROW_HEIGHT: i32 = 19;
-const MENU_TOP: i32 = CONTENT_TOP + 18;
+const MENU_TOP: i32 = CONTENT_TOP + 10;
 const ALERT_DURATION: Duration = Duration::from_secs(3);
 
 enum Screen {
@@ -254,7 +254,6 @@ fn draw_alert(canvas: &mut Canvas, alert: &mut Option<(String, Instant)>) {
 }
 
 fn draw_menu(canvas: &mut Canvas, menu: &ScrollState) {
-    canvas.draw_text("HUNTERZERO", 10, CONTENT_TOP + 2, ACCENT_COLOR, 1);
     let capacity = menu_capacity();
     let first = menu.offset;
     let last = (first + capacity).min(MODULES.len());
@@ -276,7 +275,7 @@ fn draw_menu(canvas: &mut Canvas, menu: &ScrollState) {
     canvas.draw_text(
         &format!("{}/{}", menu.selected + 1, MODULES.len().max(1)),
         SCREEN_WIDTH as i32 - 48,
-        CONTENT_TOP + 2,
+        CONTENT_TOP + 1,
         MUTED_COLOR,
         1,
     );
