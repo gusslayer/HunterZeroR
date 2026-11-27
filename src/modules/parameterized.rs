@@ -100,7 +100,10 @@ impl ParameterizedScreen {
                 Some(selected.join(","))
             }
         } else {
-            self.spec.option_values.get(self.option).map(|v| (*v).to_string())
+            self.spec
+                .option_values
+                .get(self.option)
+                .map(|v| (*v).to_string())
         }
     }
 
@@ -171,11 +174,8 @@ impl ParameterizedScreen {
     fn start_command(&mut self, processes: &mut ProcessManager) {
         let address = self.target.address();
         let option = self.option_value();
-        let command = match (self.spec.command_builder)(
-            &address,
-            self.parameter,
-            option.as_deref(),
-        ) {
+        let command = match (self.spec.command_builder)(&address, self.parameter, option.as_deref())
+        {
             Ok(command) => command,
             Err(error) => {
                 processes.message = error;

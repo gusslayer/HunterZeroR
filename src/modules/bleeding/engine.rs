@@ -4,6 +4,13 @@
 //! opens real RFCOMM/L2CAP sockets through libc; BLE DeAuth discovers writable
 //! GATT characteristics over an LE ATT socket and floods them with Write
 //! Commands. Every job has a hard deadline and a cancellation flag.
+//!
+//! Runtime requirements:
+//! - Linux with a Bluetooth adapter, BlueZ tools (`bluetoothctl`, and optionally
+//!   `hcitool`/`sdptool`), and permissions to access Bluetooth (normally root).
+//! - rfkill must not block Bluetooth; `bluetooth.service` should be active.
+//! - Raw L2CAP/RFCOMM operations require sufficient privileges; failures are
+//!   reported in the UI instead of panicking.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -136,7 +143,9 @@ struct JobContext {
 
 impl JobContext {
     fn lock(&self) -> MutexGuard<'_, JobInner> {
-        self.inner.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn cancelled(&self) -> bool {
@@ -189,7 +198,10 @@ impl BluetoothEngine {
         let Some(job) = &self.job else {
             return JobSnapshot::default();
         };
-        let inner = job.inner.lock().unwrap_or_else(|poison| poison.into_inner());
+        let inner = job
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         JobSnapshot {
             kind: inner.kind,
             running: inner.running,
@@ -216,7 +228,10 @@ impl BluetoothEngine {
     pub fn cancel(&self) {
         let Some(job) = &self.job else { return };
         job.cancel.store(true, Ordering::SeqCst);
-        let mut inner = job.inner.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut inner = job
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         if inner.running {
             inner.running = false;
             inner.message = "Cancelado".to_string();
@@ -273,9 +288,9 @@ impl BluetoothEngine {
 
     fn require_mode(&self, mode: Mode, needs_discovery: bool) -> Result<(), String> {
         match mode {
-            Mode::Ble if !self.ble_available => Err(
-                "Falta bluetoothctl o un adaptador Bluetooth (instala bluez).".to_string(),
-            ),
+            Mode::Ble if !self.ble_available => {
+                Err("Falta bluetoothctl o un adaptador Bluetooth (instala bluez).".to_string())
+            }
             Mode::Bredr if !self.bredr_available => {
                 Err("Falta soporte BR/EDR (adaptador Bluetooth/bluez).".to_string())
             }
@@ -480,15 +495,175 @@ fn run_deauth(
 // ---------------------------------------------------------------------------
 
 fn scan_ble() -> Result<Vec<Device>, String> {
-    let output = run_scan_command(&["timeout", "6", "bluetoothctl", "scan", "on"])
-        .or_else(|_| run_scan_command(&["bluetoothctl", "--timeout", "5", "scan", "on"]))?;
-    Ok(parse_scan_output(&output, "BLE"))
+    let timeout = SCAN_SECONDS.to_string();
+    // Prefer bluetoothctl --timeout: it blocks and emits [NEW] Device events.
+    let refs = ["bluetoothctl", "--timeout", timeout.as_str(), "scan", "on"];
+    let mut any_success = false;
+    let mut last_error = None;
+
+    match run_scan_command(&refs) {
+        Ok(output) => {
+            any_success = true;
+            let lower = output.to_ascii_lowercase();
+            let unsupported = lower.contains("unknown option")
+                || lower.contains("invalid option")
+                || lower.contains("unknown command");
+            if !unsupported {
+                let devices = parse_scan_output(&output, "BLE");
+                if !devices.is_empty() {
+                    return Ok(devices);
+                }
+            }
+        }
+        Err(error) => last_error = Some(error),
+    }
+
+    // Cached devices are useful when a scan just finished or the adapter is
+    // still discovering. They are also the only name source for hcitool.
+    if let Ok(known) = run_scan_command(&["bluetoothctl", "devices"]) {
+        any_success = true;
+        let devices = parse_scan_output(&known, "BLE");
+        if !devices.is_empty() {
+            return Ok(devices);
+        }
+    }
+
+    // BlueZ versions without `--timeout` cannot run `scan on` from a
+    // non-interactive process. hcitool lescan does block, so run it with a
+    // hard deadline and collect the partial output.
+    match scan_ble_hcitool() {
+        Ok(devices) => {
+            any_success = true;
+            if !devices.is_empty() {
+                return Ok(devices);
+            }
+        }
+        Err(error) => {
+            last_error.get_or_insert(error);
+        }
+    }
+
+    if any_success {
+        Ok(Vec::new())
+    } else {
+        Err(last_error.unwrap_or_else(|| "sin resultados BLE".to_string()))
+    }
 }
 
 fn scan_bredr() -> Result<Vec<Device>, String> {
-    let output = run_scan_command(&["timeout", "6", "bluetoothctl", "scan", "bredr"])
-        .or_else(|_| run_scan_command(&["hcitool", "scan"]))?;
-    Ok(parse_scan_output(&output, "BR/EDR"))
+    let timeout = SCAN_SECONDS.to_string();
+    let attempts: [&[&str]; 2] = [
+        &["hcitool", "scan"][..],
+        &[
+            "bluetoothctl",
+            "--timeout",
+            timeout.as_str(),
+            "scan",
+            "bredr",
+        ][..],
+    ];
+    let mut any_success = false;
+    let mut last_error = None;
+    for args in attempts {
+        match run_scan_command(args) {
+            Ok(output) => {
+                any_success = true;
+                let devices = parse_scan_output(&output, "BR/EDR");
+                if !devices.is_empty() {
+                    return Ok(devices);
+                }
+            }
+            Err(error) => {
+                last_error.get_or_insert(error);
+            }
+        }
+    }
+    if let Ok(output) = run_scan_command(&["bluetoothctl", "devices"]) {
+        any_success = true;
+        let devices = parse_scan_output(&output, "BR/EDR");
+        if !devices.is_empty() {
+            return Ok(devices);
+        }
+    }
+    if any_success {
+        Ok(Vec::new())
+    } else {
+        Err(last_error.unwrap_or_else(|| "sin resultados BR/EDR".to_string()))
+    }
+}
+
+#[cfg(not(windows))]
+fn scan_ble_hcitool() -> Result<Vec<Device>, String> {
+    let output = run_with_timeout(
+        "hcitool",
+        &["lescan", "--duplicates"],
+        Duration::from_secs(SCAN_SECONDS),
+    )?;
+    let devices = parse_scan_output(&output, "BLE");
+    if !devices.is_empty() {
+        return Ok(devices);
+    }
+    if let Ok(known) = run_scan_command(&["bluetoothctl", "devices"]) {
+        return Ok(parse_scan_output(&known, "BLE"));
+    }
+    Ok(Vec::new())
+}
+
+#[cfg(windows)]
+fn scan_ble_hcitool() -> Result<Vec<Device>, String> {
+    Err("hcitool no disponible".to_string())
+}
+
+#[cfg(not(windows))]
+fn run_with_timeout(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    if !command_exists(program) {
+        return Err(format!("falta {program}"));
+    }
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{program}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                break;
+            }
+            Ok(None) => sleep_ms(50),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{program}: {error}"));
+            }
+        }
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("{program}: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut text = stdout.to_string();
+    let has_stderr = !stderr.trim().is_empty();
+    if has_stderr && !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    if has_stderr {
+        text.push_str(&stderr);
+    }
+    if text.trim().is_empty() {
+        let detail = if stderr.trim().is_empty() {
+            "sin salida".to_string()
+        } else {
+            stderr.trim().chars().take(120).collect::<String>()
+        };
+        return Err(format!("{program}: {detail}"));
+    }
+    Ok(strip_ansi(&text))
 }
 
 fn run_scan_command(arguments: &[&str]) -> Result<String, String> {
@@ -502,8 +677,29 @@ fn run_scan_command(arguments: &[&str]) -> Result<String, String> {
         .args(&arguments[1..])
         .output()
         .map_err(|error| format!("{program}: {error}"))?;
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        let detail = if detail.is_empty() {
+            "fallo sin detalle".to_string()
+        } else {
+            detail.chars().take(120).collect::<String>()
+        };
+        return Err(format!("{program}: {detail}"));
+    }
+    let mut text = stdout.to_string();
+    let has_stderr = !stderr.trim().is_empty();
+    if has_stderr && !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    if has_stderr {
+        text.push_str(&stderr);
+    }
     if text.trim().is_empty() {
         return Err(format!("{program} no devolvio resultados"));
     }
@@ -709,7 +905,10 @@ pub fn parse_sdptool_output(output: &str) -> Vec<Service> {
 
 fn parse_number(value: &str) -> Option<u16> {
     let value = value.trim();
-    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+    if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
         u16::from_str_radix(hex, 16).ok()
     } else {
         value.parse().ok()
@@ -893,7 +1092,11 @@ fn att_discover(socket: i32) -> Result<Vec<u16>, String> {
         if !found || last_handle == u16::MAX {
             break;
         }
-        start = last_handle + 1;
+        let next = last_handle.saturating_add(1);
+        if next <= start {
+            break;
+        }
+        start = next;
     }
     handles.sort_unstable();
     handles.dedup();
@@ -1229,16 +1432,9 @@ mod tests {
             30
         )
         .is_ok());
-        assert!(validate_deauth_parameters(
-            "not-a-mac",
-            Mode::Ble,
-            "RFCOMM",
-            1,
-            512,
-            2,
-            30
-        )
-        .is_err());
+        assert!(
+            validate_deauth_parameters("not-a-mac", Mode::Ble, "RFCOMM", 1, 512, 2, 30).is_err()
+        );
         assert!(validate_deauth_parameters(
             "FC:FC:48:11:22:33",
             Mode::Ble,

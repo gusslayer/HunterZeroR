@@ -1,4 +1,10 @@
 //! Update screen: run `deploy/update.sh` and show its captured output.
+//!
+//! Runtime requirements:
+//! - `deploy/update.sh` must exist in the app root and be executable by bash.
+//! - The app normally runs as root under systemd; the update script uses sudo
+//!   for system operations when not root. Network/git/cargo/systemd permissions
+//!   can block execution; output is shown in the UI log.
 
 use std::path::Path;
 use std::time::Instant;

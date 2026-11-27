@@ -62,4 +62,10 @@ pub const MODULES: &[ModuleInfo] = &[
         description: "Pull, build, instala y reinicia desde la UI.",
         icon: "update",
     },
+    ModuleInfo {
+        id: "wifi_survey",
+        name: "WiFi Survey",
+        description: "Analizador de cobertura Wi-Fi con gradiente, zoom y curvas de nivel.",
+        icon: "wifi",
+    },
 ];

@@ -76,6 +76,7 @@ fn run(root: &Path) -> Result<(), String> {
     let mut next_frame = Instant::now();
     let mut next_stats = Instant::now();
     let mut running = true;
+    let mut dirty = true;
 
     while running {
         processes.update();
@@ -83,9 +84,11 @@ fn run(root: &Path) -> Result<(), String> {
         if next_stats.elapsed() >= Duration::from_secs(1) {
             stats = stats_reader.read();
             next_stats = Instant::now();
+            dirty = true;
         }
 
         for action in backend.poll() {
+            dirty = true;
             if action == Action::Quit {
                 running = false;
                 break;
@@ -122,22 +125,28 @@ fn run(root: &Path) -> Result<(), String> {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 module.sync(&mut processes);
             }));
+            dirty = true;
             if result.is_err() {
                 recover_module(&mut screen, &mut processes, &mut alert, "sync");
             }
+        } else if alert.is_some() {
+            dirty = true;
         }
 
-        render(
-            &mut canvas,
-            &mut screen,
-            &menu,
-            &mut processes,
-            &stats,
-            &mut alert,
-        );
+        if dirty {
+            render(
+                &mut canvas,
+                &mut screen,
+                &menu,
+                &mut processes,
+                &stats,
+                &mut alert,
+            );
 
-        if let Err(error) = backend.present(&canvas) {
-            crate::core::logging::event("WARN", "platform", &format!("present: {error}"));
+            if let Err(error) = backend.present(&canvas) {
+                crate::core::logging::event("WARN", "platform", &format!("present: {error}"));
+            }
+            dirty = false;
         }
 
         next_frame += frame;
@@ -201,14 +210,6 @@ fn render(
     alert: &mut Option<(String, Instant)>,
 ) {
     canvas.clear(BG_COLOR);
-    // Always clear content area before module draw to avoid visual corruption.
-    canvas.fill_rect(
-        0,
-        CONTENT_TOP,
-        SCREEN_WIDTH as i32,
-        CONTENT_HEIGHT,
-        BG_COLOR,
-    );
 
     let mut draw_panic = false;
     match screen {

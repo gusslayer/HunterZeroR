@@ -3,6 +3,12 @@
 //! This is the path used on the GPi Case 2W. With `vc4-kms-dpi-generic` the
 //! kernel exposes a 640x480 framebuffer through fbdev emulation; no X server,
 //! SDL or GLES is required.
+//!
+//! Runtime requirements:
+//! - Read/write access to `/dev/fb0` (or `/dev/fb1`) and read access to
+//!   `/dev/input/event*`. On HunterZero this is satisfied by running as root
+//!   under systemd; non-root execution needs appropriate video/input group
+//!   permissions.
 
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read};
@@ -39,6 +45,7 @@ pub struct FbBackend {
     input: EvdevInput,
     debouncer: Debouncer,
     description: String,
+    row_buffer: Vec<u8>,
 }
 
 impl FbBackend {
@@ -124,36 +131,8 @@ impl FbBackend {
             input,
             debouncer: Debouncer::new(),
             description: format!("framebuffer {}x{} {}bpp", width, height, bpp),
+            row_buffer: Vec::new(),
         })
-    }
-
-    fn write_pixel(&mut self, x: usize, y: usize, color: u32) {
-        let offset = y * self.stride + x * self.bpp / 8;
-        if offset + self.bpp / 8 > self.len {
-            return;
-        }
-        unsafe {
-            let pointer = self.map.add(offset);
-            match self.bpp {
-                32 => std::ptr::write_unaligned(pointer as *mut u32, color),
-                24 => {
-                    let red = ((color >> 16) & 0xFF) as u8;
-                    let green = ((color >> 8) & 0xFF) as u8;
-                    let blue = (color & 0xFF) as u8;
-                    *pointer = blue;
-                    *pointer.add(1) = green;
-                    *pointer.add(2) = red;
-                }
-                16 => {
-                    let red = ((color >> 16) & 0xFF) as u16;
-                    let green = ((color >> 8) & 0xFF) as u16;
-                    let blue = (color & 0xFF) as u16;
-                    let packed = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
-                    std::ptr::write_unaligned(pointer as *mut u16, packed);
-                }
-                _ => {}
-            }
-        }
     }
 }
 
@@ -167,23 +146,74 @@ impl super::Backend for FbBackend {
         let offset_x = (self.width.saturating_sub(canvas_width * scale)) / 2;
         let offset_y = (self.height.saturating_sub(canvas_height * scale)) / 2;
         let pixels = canvas.pixels();
+
+        let bytes_per_pixel = self.bpp / 8;
+        let row_bytes = canvas_width * scale * bytes_per_pixel;
+        if self.row_buffer.len() != row_bytes {
+            self.row_buffer.resize(row_bytes, 0);
+        }
+
         for y in 0..canvas_height {
             for x in 0..canvas_width {
                 let color = pixels[y * canvas_width + x];
-                for dy in 0..scale {
-                    let target_y = offset_y + y * scale + dy;
-                    if target_y >= self.height {
-                        continue;
-                    }
-                    for dx in 0..scale {
-                        let target_x = offset_x + x * scale + dx;
-                        if target_x < self.width {
-                            self.write_pixel(target_x, target_y, color);
+                let base_idx = x * scale * bytes_per_pixel;
+                match self.bpp {
+                    32 => {
+                        for s in 0..scale {
+                            let idx = base_idx + s * bytes_per_pixel;
+                            let bytes = color.to_ne_bytes();
+                            self.row_buffer[idx..idx + 4].copy_from_slice(&bytes);
                         }
+                    }
+                    24 => {
+                        let red = ((color >> 16) & 0xFF) as u8;
+                        let green = ((color >> 8) & 0xFF) as u8;
+                        let blue = (color & 0xFF) as u8;
+                        for s in 0..scale {
+                            let idx = base_idx + s * bytes_per_pixel;
+                            self.row_buffer[idx] = blue;
+                            self.row_buffer[idx + 1] = green;
+                            self.row_buffer[idx + 2] = red;
+                        }
+                    }
+                    16 => {
+                        let red = ((color >> 16) & 0xFF) as u16;
+                        let green = ((color >> 8) & 0xFF) as u16;
+                        let blue = (color & 0xFF) as u16;
+                        let packed: u16 = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
+                        for s in 0..scale {
+                            let idx = base_idx + s * bytes_per_pixel;
+                            let bytes = packed.to_ne_bytes();
+                            self.row_buffer[idx..idx + 2].copy_from_slice(&bytes);
+                        }
+                    }
+                    _ => {
+                        // bpp is validated in new(), so this arm should never be reached.
                     }
                 }
             }
+
+            for dy in 0..scale {
+                let target_y = offset_y + y * scale + dy;
+                if target_y >= self.height {
+                    break;
+                }
+                let dst_offset = target_y * self.stride + offset_x * bytes_per_pixel;
+                if dst_offset + row_bytes > self.len {
+                    continue;
+                }
+                // SAFETY: dst_offset + row_bytes is bounds-checked against the mmap
+                // length, and row_buffer is exactly row_bytes long.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        self.row_buffer.as_ptr(),
+                        self.map.add(dst_offset),
+                        row_bytes,
+                    );
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -328,7 +358,7 @@ impl EvdevInput {
     }
 
     fn poll(&mut self) -> Vec<Action> {
-        if self.last_scan.elapsed().as_secs() >= 3 {
+        if self.last_scan.elapsed().as_secs() >= 30 {
             self.rescan();
         }
 

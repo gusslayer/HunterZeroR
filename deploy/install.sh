@@ -10,6 +10,9 @@ SERVICE_NAME="hunterzero.service"
 BIN_NAME="hunterzero-rust"
 BIN_DST="/usr/local/bin/${BIN_NAME}"
 CONFIG_DST="/boot/firmware/config.txt"
+if [[ ! -f "$CONFIG_DST" && -f "/boot/config.txt" ]]; then
+  CONFIG_DST="/boot/config.txt"
+fi
 CONFIG_SRC="$(dirname "$0")/config.txt"
 SWAP_FILE="/var/swap-hunterzero"
 
@@ -101,13 +104,15 @@ ensure_rust() {
   require_cmd rustc || die "rustc no quedó disponible tras instalar Rust."
   if require_cmd rustup; then
     rustup default stable >/dev/null 2>&1 || warn "No se pudo fijar toolchain stable (continuando)."
+    rustup component add rustfmt clippy >/dev/null 2>&1 ||
+      warn "No se pudieron instalar rustfmt/clippy; los gates de formato/lint se omitirán."
   fi
   log "Toolchain: $(rustc --version) / $(cargo --version)"
 }
 
 write_display_config() {
   log "Configurando pantalla GPi CASE 2W..."
-  local config_backup="/boot/firmware/config.txt.backup.$(date +%Y%m%d%H%M%S)"
+  local config_backup="${CONFIG_DST}.backup.$(date +%Y%m%d%H%M%S)"
   local block
   block=$(cat <<'EOF'
 
@@ -133,6 +138,7 @@ EOF
     fi
   else
     log "Creando nuevo config.txt..."
+    as_root mkdir -p "$(dirname "$CONFIG_DST")"
     if [[ -f "$CONFIG_SRC" ]]; then
       as_root cp "$CONFIG_SRC" "$CONFIG_DST"
     else
@@ -199,7 +205,9 @@ run_preflight_checks() {
 
   if cargo clippy --version >/dev/null 2>&1; then
     log "Preflight: cargo clippy..."
-    cargo_with_jobs "$jobs" clippy --all-targets -- -D warnings || warn "Clippy reportó warnings/errores (no bloqueante en instalador automático)."
+    # -j must go before `--`; otherwise it is forwarded to rustc and clippy fails.
+    CARGO_BUILD_JOBS="$jobs" cargo clippy --all-targets -j "$jobs" -- -D warnings ||
+      warn "Clippy reportó warnings/errores (no bloqueante en instalador automático)."
   else
     warn "clippy no disponible; omitiendo cargo clippy."
   fi
@@ -280,6 +288,79 @@ install_binary() {
   log "Binario instalado en $BIN_DST"
 }
 
+install_poweroff_service() {
+  log "Configurando apagado seguro GPIO (GPi Case 2W)..."
+  if [[ -f "$CONFIG_DST" ]] && ! grep -qE '^[[:space:]]*gpio=27=op,dh' "$CONFIG_DST" 2>/dev/null; then
+    printf '\n# HunterZero-Rust safe shutdown GPIO\ngpio=27=op,dh\ngpio=26=ip,pu\n' | as_root tee -a "$CONFIG_DST" >/dev/null
+    log "Líneas GPIO de apagado seguro agregadas a config.txt"
+  fi
+  as_root tee /usr/local/bin/hunterzero-poweroff.sh >/dev/null <<'POWEROFF'
+#!/bin/bash
+# HunterZero safe shutdown for Retroflag GPi Case 2W.
+# GPIO27 = power latch (output, high). GPIO26 = power button (input, active low).
+set -eu
+
+if command -v pinctrl >/dev/null 2>&1; then
+  pinctrl set 27 op dh
+  pinctrl set 26 ip pu
+  while true; do
+    state="$(pinctrl get 26 2>/dev/null || true)"
+    case "$state" in
+      *"lo"*|*"dl"*|*"level=0"*)
+        /sbin/shutdown -h now "HunterZero safe shutdown"
+        exit 0
+        ;;
+    esac
+    sleep 1
+  done
+elif command -v raspi-gpio >/dev/null 2>&1; then
+  raspi-gpio set 27 op dh
+  raspi-gpio set 26 ip pu
+  while true; do
+    state="$(raspi-gpio get 26 2>/dev/null || true)"
+    case "$state" in
+      *"level=0"*)
+        /sbin/shutdown -h now "HunterZero safe shutdown"
+        exit 0
+        ;;
+    esac
+    sleep 1
+  done
+else
+  echo "No GPIO tool found (pinctrl/raspi-gpio)" >&2
+  exit 1
+fi
+POWEROFF
+  as_root chmod +x /usr/local/bin/hunterzero-poweroff.sh
+
+  if ! require_cmd pinctrl && ! require_cmd raspi-gpio; then
+    warn "No hay pinctrl ni raspi-gpio; hunterzero-poweroff.service no se habilitará."
+    return 0
+  fi
+
+  as_root tee /etc/systemd/system/hunterzero-poweroff.service >/dev/null <<'EOF'
+[Unit]
+Description=HunterZero Safe Shutdown (GPi Case 2W)
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hunterzero-poweroff.sh
+Restart=on-failure
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  as_root systemctl daemon-reload
+  as_root systemctl enable hunterzero-poweroff.service
+  as_root systemctl restart hunterzero-poweroff.service ||
+    warn "No se pudo iniciar hunterzero-poweroff.service; revisa 'systemctl status hunterzero-poweroff'."
+  log "Servicio hunterzero-poweroff.service habilitado."
+}
+
 install_service() {
   log "Configurando servicio systemd..."
   as_root tee "/etc/systemd/system/${SERVICE_NAME}" >/dev/null <<EOF
@@ -322,10 +403,50 @@ main() {
     nmap \
     dnsutils \
     bluez \
-    iputils-ping
+    iputils-ping \
+    alsa-utils \
+    iw \
+    rfkill
+
+  log "Instalando utilidades GPIO para apagado seguro..."
+  as_root apt-get install -y --no-install-recommends raspi-utils ||
+    as_root apt-get install -y --no-install-recommends raspi-gpio ||
+    warn "No se pudo instalar pinctrl/raspi-gpio; el apagado seguro GPIO quedará deshabilitado."
 
   write_display_config
-  log "Apagado GPIO gestionado por hunterzero-poweroff.service (sin dtoverlay=gpio-shutdown)."
+  install_poweroff_service
+
+  log "Configurando servicios de red/Bluetooth..."
+  as_root rfkill unblock wlan bluetooth >/dev/null 2>&1 || true
+  as_root systemctl enable bluetooth >/dev/null 2>&1 || true
+  as_root systemctl restart bluetooth >/dev/null 2>&1 || warn "No se pudo reiniciar bluetooth (continuando)."
+
+  log "Verificando dependencias runtime..."
+  for cmd in iw rfkill bluetoothctl hcitool aplay; do
+    if require_cmd "$cmd"; then
+      log "  OK: $cmd"
+    else
+      warn "  Falta comando runtime: $cmd"
+    fi
+  done
+  if require_cmd pinctrl || require_cmd raspi-gpio; then
+    log "  OK: GPIO tool (pinctrl/raspi-gpio)"
+  else
+    warn "  Falta pinctrl/raspi-gpio: apagado seguro GPIO deshabilitado."
+  fi
+
+  log "Verificando estado Wi-Fi/Bluetooth..."
+  if require_cmd rfkill; then
+    rfkill list || true
+  fi
+  if require_cmd bluetoothctl; then
+    bluetoothctl show >/dev/null 2>&1 && log "  bluetoothctl show: OK" || warn "  bluetoothctl show: no disponible (¿bluetooth apagado/bloqueado?)"
+  fi
+  systemctl status bluetooth --no-pager >/dev/null 2>&1 && log "  bluetooth.service: OK" || warn "  bluetooth.service: no activo o con problemas"
+  systemctl status bluetooth --no-pager 2>&1 | tail -n 5 || true
+  if require_cmd iw; then
+    iw dev >/dev/null 2>&1 && log "  iw dev: OK" || warn "  iw dev: no disponible (¿sin interfaz Wi-Fi?)"
+  fi
 
   ensure_repo
   ensure_rust
@@ -338,6 +459,9 @@ main() {
   export PATH="$HOME/.cargo/bin:$PATH"
   require_cmd cargo || die "cargo no disponible"
 
+  # Preflight and tests also compile the crate; create swap before them on a
+  # 512 MB Pi Zero so cargo does not get OOM-killed before build_release runs.
+  ensure_swap_if_low_mem
   run_preflight_checks
   run_tests
   build_release

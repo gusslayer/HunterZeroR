@@ -12,11 +12,11 @@ use crate::theme::*;
 
 mod engine;
 
+use super::{Outcome, ToolScreen};
 use engine::{
     port_for_protocol, BluetoothEngine, Device, Kind, Mode, Service, ATTACK_DURATIONS,
     PACKET_SIZES, PROTOCOLS, THREAD_COUNTS,
 };
-use super::{Outcome, ToolScreen};
 
 const SETTINGS_ROWS: [&str; 7] = [
     "MODO", "OBJETIVO", "ESCANEAR", "ENUMERAR", "DEAUTH", "AYUDA", "VOLVER",
@@ -242,9 +242,12 @@ impl BleedingScreen {
     fn handle_devices(&mut self, action: Action) -> Outcome {
         if !self.devices.is_empty() {
             self.device_view.update(self.devices.len(), None);
+            let page = self.device_view.capacity as i32;
             match action {
                 Action::Up => self.device_view.move_by(-1),
                 Action::Down => self.device_view.move_by(1),
+                Action::Left => self.device_view.move_by(-page),
+                Action::Right => self.device_view.move_by(page),
                 Action::Open | Action::Start => {
                     if let Some(device) = self.devices.get(self.device_view.selected) {
                         self.editor = MacEditor::new(&device.address);
@@ -265,9 +268,12 @@ impl BleedingScreen {
     fn handle_services(&mut self, action: Action) -> Outcome {
         if !self.services.is_empty() {
             self.service_view.update(self.services.len(), None);
+            let page = self.service_view.capacity as i32;
             match action {
                 Action::Up => self.service_view.move_by(-1),
                 Action::Down => self.service_view.move_by(1),
+                Action::Left => self.service_view.move_by(-page),
+                Action::Right => self.service_view.move_by(page),
                 _ => {}
             }
         }
@@ -610,6 +616,7 @@ impl ToolScreen for BleedingScreen {
             }
             Phase::Result => {
                 self.result_view.update(self.result_lines().len(), None);
+                let page = self.result_view.capacity as i32;
                 match action {
                     Action::Up => {
                         self.result_view.move_by(-1);
@@ -617,6 +624,14 @@ impl ToolScreen for BleedingScreen {
                     }
                     Action::Down => {
                         self.result_view.move_by(1);
+                        Outcome::Stay
+                    }
+                    Action::Left => {
+                        self.result_view.move_by(-page);
+                        Outcome::Stay
+                    }
+                    Action::Right => {
+                        self.result_view.move_by(page);
                         Outcome::Stay
                     }
                     Action::Open | Action::Start => {

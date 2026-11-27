@@ -16,6 +16,7 @@ pub mod ping;
 pub mod proc_monitor;
 pub mod system_monitor;
 pub mod update;
+pub mod wifi_survey;
 
 /// What the application should do after a screen handles an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub fn create(id: &str, root: &Path) -> Option<Box<dyn ToolScreen>> {
         "proc_monitor" => Some(Box::new(proc_monitor::ProcMonitorScreen::new())),
         "system_monitor" => Some(Box::new(system_monitor::SystemMonitorScreen::new())),
         "update" => Some(Box::new(update::UpdateScreen::new(root))),
+        "wifi_survey" => Some(Box::new(wifi_survey::WifiSurveyScreen::new(root))),
         _ => None,
     }
 }

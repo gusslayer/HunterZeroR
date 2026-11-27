@@ -21,10 +21,11 @@ Portable diagnostics UI for **GPi Case 2W + Raspberry Pi Zero W v1.1** (PiOS Lit
 | `proc_monitor` | Lista de procesos por CPU |
 | `system_monitor` | CPU/RAM/temp/IP/Wi-Fi/batería/disco/reloj |
 | `update` | Ejecuta `deploy/update.sh` y muestra salida |
+| `wifi_survey` | Descubre SSID, selecciona uno y mide señal/heatmap en tiempo real |
 
 ## Assets
 
-- `assets/icons/`: 24 SVG (`add`, `alert`, `battery`, `bleeding`, `bluetooth`, `config`, `exit`, `file`, `folder`, `help`, `info`, `menu`, `nmap`, `nslookup`, `ping`, `proc_monitor`, `search`, `settings`, `success`, `system_monitor`, `update`, `warning`, `wifi`).
+- `assets/icons/`: iconos PNG (`add`, `alert`, `battery`, `bleeding`, `bluetooth`, `config`, `exit`, `file`, `folder`, `help`, `info`, `menu`, `nmap`, `nslookup`, `ping`, `proc_monitor`, `search`, `settings`, `success`, `system_monitor`, `update`, `warning`, `wifi`, entre otros).
 - `assets/fonts/PressStart2P-Regular.ttf`.
 
 ## Docs
@@ -54,10 +55,30 @@ Portable diagnostics UI for **GPi Case 2W + Raspberry Pi Zero W v1.1** (PiOS Lit
     ├── core/        # input, font, logging, plugins, process_manager, state, system_stats, ui, validation
     ├── gfx.rs       # canvas 320x240
     ├── main.rs      # loop, menú, backend
-    ├── modules/     # 8 ToolScreen modules
+    ├── modules/     # 9 ToolScreen modules
     ├── platform/    # linux fbdev+evdev, windows gdi
     └── theme.rs     # colores y layout
 ```
+
+## Toolchain
+
+Requisitos mínimos: Rust stable 1.75+ con `rustfmt` y `clippy`.
+
+```bash
+# Linux / Raspberry Pi OS
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+source "$HOME/.cargo/env"
+rustup component add rustfmt clippy
+
+# Dependencias de compilación y runtime en PiOS
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config file \
+  bluez iw rfkill alsa-utils raspi-utils
+```
+
+En Windows (desarrollo) instala **Visual Studio Build Tools** con la carga de trabajo
+“Desarrollo para el escritorio con C++” (aporta `link.exe`), o usa WSL/Pi para el
+gatekeeper completo.
 
 ## Build
 

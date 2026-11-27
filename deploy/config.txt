@@ -11,6 +11,8 @@ dtparam=width-mm=60,height-mm=45
 # No se usa dtoverlay=gpio-shutdown ni gpio-led: ambos reclamarían las líneas
 # 26/27 y evitarían que hunterzero-poweroff.service las controle. El servicio
 # mantiene GPIO 27 en alto (power enable) y apaga con el botón físico en GPIO 26.
+gpio=27=op,dh
+gpio=26=ip,pu
 
 # 3. Audio (primero prueba el PWM predeterminado; si no funciona, cambia a audremap)
 dtparam=audio=on

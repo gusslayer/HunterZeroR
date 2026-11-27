@@ -171,6 +171,53 @@ impl Canvas {
         let scale = scale.max(1);
         let flattened = font::plain_text(text);
         let mut cursor = x;
+        // Fast path for scale == 1: write directly into the pixel buffer.
+        if scale == 1 {
+            if x >= 0 && y >= 0 && x < self.width && y < self.height {
+                for character in flattened.chars() {
+                    let upper = character.to_ascii_uppercase();
+                    let rows = font::glyph(upper);
+                    for (row_index, row) in rows.iter().enumerate() {
+                        let ty = y + row_index as i32;
+                        if ty < 0 || ty >= self.height {
+                            continue;
+                        }
+                        let base = ty * self.width as i32;
+                        for (column_index, bit) in row.chars().enumerate() {
+                            if bit == '1' {
+                                let tx = cursor + column_index as i32;
+                                if tx >= 0 && tx < self.width {
+                                    self.pixels[(base + tx) as usize] = color;
+                                }
+                            }
+                        }
+                    }
+                    cursor += 8;
+                }
+            } else {
+                // Fall back to the scale > 1 path if outside canvas bounds.
+                for character in flattened.chars() {
+                    let upper = character.to_ascii_uppercase();
+                    let rows = font::glyph(upper);
+                    for (row_index, row) in rows.iter().enumerate() {
+                        for (column_index, bit) in row.chars().enumerate() {
+                            if bit == '1' {
+                                self.fill_rect(
+                                    cursor + column_index as i32 * scale,
+                                    y + row_index as i32 * scale,
+                                    scale,
+                                    scale,
+                                    color,
+                                );
+                            }
+                        }
+                    }
+                    cursor += 8 * scale;
+                }
+            }
+            return cursor - x;
+        }
+        // Original logic for scale > 1.
         for character in flattened.chars() {
             let upper = character.to_ascii_uppercase();
             let rows = font::glyph(upper);

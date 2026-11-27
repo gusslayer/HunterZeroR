@@ -20,6 +20,8 @@ pub const SELECTED_BG: Color = rgb(58, 20, 0);
 pub const GRID_COLOR: Color = rgb(38, 38, 38);
 pub const SUCCESS_COLOR: Color = rgb(120, 200, 120);
 pub const ERROR_COLOR: Color = rgb(255, 110, 90);
+pub const THERMAL_STABLE_COLOR: Color = rgb(120, 220, 200);
+pub const THERMAL_WEAK_COLOR: Color = rgb(230, 190, 60);
 
 /// Width of the virtual canvas.
 pub const SCREEN_WIDTH: u32 = 320;
