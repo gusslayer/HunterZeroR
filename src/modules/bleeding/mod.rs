@@ -69,6 +69,7 @@ enum Phase {
 pub struct BleedingScreen {
     engine: BluetoothEngine,
     editor: MacEditor,
+    target_set: bool,
     mode: usize,
     selected: usize,
     phase: Phase,
@@ -104,6 +105,7 @@ impl BleedingScreen {
         Self {
             engine: BluetoothEngine::new(),
             editor: MacEditor::new(DEFAULT_MAC),
+            target_set: false,
             mode: 0,
             selected: 0,
             phase: Phase::Settings,
@@ -161,12 +163,24 @@ impl BleedingScreen {
     }
 
     fn start_enumeration(&mut self, processes: &mut ProcessManager) {
+        if !self.target_set {
+            self.result_message = "Escanea y selecciona un objetivo primero.".to_string();
+            self.phase = Phase::Result;
+            processes.message = self.result_message.clone();
+            return;
+        }
         let address = self.editor.value();
         let result = self.engine.start_enumeration(&address, self.mode());
         self.start_action(Kind::Enum, result, processes);
     }
 
     fn start_deauth(&mut self, processes: &mut ProcessManager) {
+        if !self.target_set {
+            self.result_message = "Escanea y selecciona un objetivo primero.".to_string();
+            self.phase = Phase::Result;
+            processes.message = self.result_message.clone();
+            return;
+        }
         let address = self.editor.value();
         let mode = self.mode();
         let protocol = PROTOCOLS[self.protocol_index];
@@ -251,6 +265,7 @@ impl BleedingScreen {
                 Action::Open | Action::Start => {
                     if let Some(device) = self.devices.get(self.device_view.selected) {
                         self.editor = MacEditor::new(&device.address);
+                        self.target_set = true;
                         self.selected = 1;
                         self.result_message = "OBJETIVO SELECCIONADO".to_string();
                         self.phase = Phase::Settings;
@@ -335,7 +350,12 @@ impl BleedingScreen {
             );
         }
         canvas.draw_text(self.mode().label(), 240, 34, ACCENT_COLOR, 1);
-        canvas.draw_text_clipped(&self.editor.value(), 152, 52, 140, ACCENT_COLOR, 1);
+        let target_label = if self.target_set {
+            self.editor.value()
+        } else {
+            "SIN OBJETIVO".to_string()
+        };
+        canvas.draw_text_clipped(&target_label, 152, 52, 140, ACCENT_COLOR, 1);
 
         draw_frame(canvas, 10, 160, 300, 46, GRID_COLOR, Some(PANEL_COLOR));
         let state = self.engine.snapshot();
@@ -584,10 +604,14 @@ impl ToolScreen for BleedingScreen {
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome {
         match self.phase {
             Phase::EditTarget => {
-                if let Some(EditResult::Saved | EditResult::Cancelled) =
-                    self.editor.handle(action.as_open())
-                {
-                    self.phase = Phase::Settings;
+                if let Some(result) = self.editor.handle(action.as_open()) {
+                    match result {
+                        EditResult::Saved => {
+                            self.target_set = true;
+                            self.phase = Phase::Settings;
+                        }
+                        EditResult::Cancelled => self.phase = Phase::Settings,
+                    }
                 }
                 Outcome::Stay
             }
