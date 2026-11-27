@@ -3,8 +3,8 @@
 //! Runtime requirements:
 //! - Linux: `iw` must be installed and the process needs permission to scan
 //!   (usually root, which is how HunterZero runs under systemd).
-//! - The interface name is currently fixed to `wlan0`; on systems with a
-//!   different Wi-Fi interface name, scan will fail with a visible error.
+//! - The Wi-Fi interface is auto-detected from `iw dev` (preferring `wlan0`
+//!   when present); if no interface is found, the UI reports a clear error.
 //! - Windows/non-Linux: simulated scan data is used for development.
 
 use std::collections::VecDeque;
@@ -142,6 +142,7 @@ enum WorkerMsg {
 struct WorkerCtl {
     mode: Mode,
     force_scan: bool,
+    iface: String,
 }
 
 pub struct WifiSurveyScreen {
@@ -159,6 +160,8 @@ pub struct WifiSurveyScreen {
     save_flash: Option<Instant>,
     status_msg: String,
     last_error: Option<String>,
+    ifaces: Vec<String>,
+    iface_idx: usize,
     rx: Receiver<WorkerMsg>,
     stop: Arc<AtomicBool>,
     ctl: Arc<Mutex<WorkerCtl>>,
@@ -169,9 +172,16 @@ impl WifiSurveyScreen {
     pub fn new(root: &Path) -> Self {
         let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
+        let ifaces = detect_wifi_ifaces();
+        let iface_idx = 0usize;
+        let iface = ifaces
+            .get(iface_idx)
+            .cloned()
+            .unwrap_or_else(|| "wlan0".to_string());
         let ctl = Arc::new(Mutex::new(WorkerCtl {
             mode: Mode::Discover,
             force_scan: true,
+            iface: iface.clone(),
         }));
         let worker_stop = Arc::clone(&stop);
         let worker_ctl = Arc::clone(&ctl);
@@ -198,6 +208,8 @@ impl WifiSurveyScreen {
             save_flash: None,
             status_msg: String::new(),
             last_error: None,
+            ifaces,
+            iface_idx,
             rx,
             stop,
             ctl,
@@ -383,8 +395,18 @@ impl WifiSurveyScreen {
 
     fn draw_header(&self, canvas: &mut Canvas) {
         let mode = self.mode.label();
+        let iface = self
+            .ifaces
+            .get(self.iface_idx)
+            .map(String::as_str)
+            .unwrap_or("wlan0");
         let zoom = self.zoom.label();
-        canvas.draw_text_clipped(&format!("{mode} Z:{zoom}"), 4, 30, 120, ACCENT_COLOR, 1);
+        let left = if self.mode == Mode::Survey {
+            format!("{mode} Z:{zoom}")
+        } else {
+            format!("{mode} {iface}")
+        };
+        canvas.draw_text_clipped(&left, 4, 30, 120, ACCENT_COLOR, 1);
         let ch = self
             .link
             .channel
@@ -612,11 +634,33 @@ impl ToolScreen for WifiSurveyScreen {
             Action::Left => {
                 if self.mode == Mode::Survey {
                     self.zoom = self.zoom.prev();
+                } else if self.ifaces.len() > 1 {
+                    self.iface_idx = if self.iface_idx == 0 {
+                        self.ifaces.len() - 1
+                    } else {
+                        self.iface_idx - 1
+                    };
+                    if let Some(iface) = self.ifaces.get(self.iface_idx).cloned() {
+                        self.status_msg = format!("IFACE: {iface}");
+                        if let Ok(mut ctl) = self.ctl.lock() {
+                            ctl.iface = iface;
+                            ctl.force_scan = true;
+                        }
+                    }
                 }
             }
             Action::Right => {
                 if self.mode == Mode::Survey {
                     self.zoom = self.zoom.next();
+                } else if self.ifaces.len() > 1 {
+                    self.iface_idx = (self.iface_idx + 1) % self.ifaces.len();
+                    if let Some(iface) = self.ifaces.get(self.iface_idx).cloned() {
+                        self.status_msg = format!("IFACE: {iface}");
+                        if let Ok(mut ctl) = self.ctl.lock() {
+                            ctl.iface = iface;
+                            ctl.force_scan = true;
+                        }
+                    }
                 }
             }
             Action::Up => {
@@ -658,7 +702,25 @@ impl ToolScreen for WifiSurveyScreen {
                 }
             }
             Action::Start => {
+                if self.mode == Mode::Discover {
+                    let prev = self
+                        .ifaces
+                        .get(self.iface_idx)
+                        .cloned()
+                        .unwrap_or_else(|| "wlan0".to_string());
+                    let refreshed = detect_wifi_ifaces();
+                    if !refreshed.is_empty() {
+                        self.ifaces = refreshed;
+                        self.iface_idx = self.ifaces.iter().position(|i| i == &prev).unwrap_or(0);
+                    }
+                }
+                let iface = self
+                    .ifaces
+                    .get(self.iface_idx)
+                    .cloned()
+                    .unwrap_or_else(|| "wlan0".to_string());
                 if let Ok(mut ctl) = self.ctl.lock() {
+                    ctl.iface = iface;
                     ctl.force_scan = true;
                 }
                 self.status_msg = if self.mode == Mode::Discover {
@@ -742,13 +804,13 @@ fn worker_loop(stop: Arc<AtomicBool>, ctl: Arc<Mutex<WorkerCtl>>, tx: mpsc::Send
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        let (mode, force_scan) = match ctl.lock() {
+        let (mode, force_scan, iface) = match ctl.lock() {
             Ok(mut c) => {
                 let fs = c.force_scan;
                 c.force_scan = false;
-                (c.mode, fs)
+                (c.mode, fs, c.iface.clone())
             }
-            Err(_) => (Mode::Discover, false),
+            Err(_) => (Mode::Discover, false, "wlan0".to_string()),
         };
 
         let interval = if force_scan {
@@ -761,7 +823,7 @@ fn worker_loop(stop: Arc<AtomicBool>, ctl: Arc<Mutex<WorkerCtl>>, tx: mpsc::Send
         };
         if force_scan || last_scan.elapsed() >= interval {
             last_scan = Instant::now();
-            let msg = collect_scan(sim_tick);
+            let msg = collect_scan(sim_tick, &iface);
             sim_tick = sim_tick.wrapping_add(1);
             if tx.send(msg).is_err() {
                 break;
@@ -771,26 +833,32 @@ fn worker_loop(stop: Arc<AtomicBool>, ctl: Arc<Mutex<WorkerCtl>>, tx: mpsc::Send
     }
 }
 
-fn collect_scan(sim_tick: i32) -> WorkerMsg {
+fn collect_scan(sim_tick: i32, iface: &str) -> WorkerMsg {
     #[cfg(windows)]
     {
+        let _ = iface;
         WorkerMsg::Scan(simulated_scan(sim_tick))
     }
     #[cfg(not(windows))]
     {
         let _ = sim_tick;
-        match run_iw_scan() {
+        if iface.trim().is_empty() {
+            return WorkerMsg::Error(
+                "SCAN: no se detectó interfaz Wi-Fi. Revisa adaptador/rfkill.".to_string(),
+            );
+        }
+        match run_iw_scan(iface) {
             Ok(output) => WorkerMsg::Scan(parse_iw_scan(&output)),
             Err(error) => {
                 #[cfg(target_os = "linux")]
                 {
-                    if let Ok(link_output) = run_iw_link() {
+                    if let Ok(link_output) = run_iw_link(iface) {
                         let info = parse_iw_link(&link_output);
                         if info.connected {
                             return WorkerMsg::Link(info);
                         }
                     }
-                    WorkerMsg::Error(format!("SCAN: {}", short_error(&error)))
+                    WorkerMsg::Error(format!("SCAN[{iface}]: {}", short_error(&error)))
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
@@ -803,16 +871,57 @@ fn collect_scan(sim_tick: i32) -> WorkerMsg {
 }
 
 #[cfg(not(windows))]
-fn run_iw_scan() -> Result<String, String> {
-    // Hardcoded to wlan0: the GPi Case 2W/Pi Zero W target uses wlan0.
+fn run_iw_scan(iface: &str) -> Result<String, String> {
     // Scanning requires root or CAP_NET_ADMIN; errors are surfaced to the UI.
-    run_command("iw", &["dev", "wlan0", "scan"])
+    run_command("iw", &["dev", iface, "scan"])
 }
 
 #[cfg(target_os = "linux")]
-fn run_iw_link() -> Result<String, String> {
+fn run_iw_link(iface: &str) -> Result<String, String> {
     // Fallback when scan fails (e.g. busy/rfkill/permissions): read link state.
-    run_command("iw", &["dev", "wlan0", "link"])
+    run_command("iw", &["dev", iface, "link"])
+}
+
+#[cfg(target_os = "linux")]
+fn detect_wifi_ifaces() -> Vec<String> {
+    let mut ifaces = Vec::new();
+    let Ok(output) = run_command("iw", &["dev"]) else {
+        return ifaces;
+    };
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix("Interface ") {
+            let name = name.trim();
+            if !name.is_empty() && !ifaces.iter().any(|i: &String| i == name) {
+                ifaces.push(name.to_string());
+            }
+        }
+    }
+    // Prefer wlan0 first for predictable default on GPi Case 2W.
+    if let Some(pos) = ifaces.iter().position(|i| i == "wlan0") {
+        if pos != 0 {
+            let iface = ifaces.remove(pos);
+            ifaces.insert(0, iface);
+        }
+    }
+    ifaces
+}
+
+#[cfg(target_os = "linux")]
+fn detect_wifi_iface() -> Option<String> {
+    detect_wifi_ifaces().into_iter().next()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_wifi_ifaces() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        vec!["sim0".to_string()]
+    }
+    #[cfg(not(windows))]
+    {
+        vec!["wlan0".to_string()]
+    }
 }
 
 #[cfg(not(windows))]
