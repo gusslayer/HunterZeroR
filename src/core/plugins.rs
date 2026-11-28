@@ -63,6 +63,12 @@ pub const MODULES: &[ModuleInfo] = &[
         icon: "update",
     },
     ModuleInfo {
+        id: "power",
+        name: "Apagado",
+        description: "Apagar o reiniciar el sistema desde la UI.",
+        icon: "exit",
+    },
+    ModuleInfo {
         id: "wifi_survey",
         name: "WiFi Survey",
         description: "Analizador de cobertura Wi-Fi con gradiente, zoom y curvas de nivel.",

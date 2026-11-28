@@ -13,6 +13,7 @@ pub mod nmap;
 pub mod nslookup;
 pub mod parameterized;
 pub mod ping;
+pub mod power;
 pub mod proc_monitor;
 pub mod system_monitor;
 pub mod update;
@@ -53,6 +54,7 @@ pub fn create(id: &str, root: &Path) -> Option<Box<dyn ToolScreen>> {
         "nmap" => Some(Box::new(nmap::NmapScreen::new())),
         "nslookup" => Some(Box::new(nslookup::NsLookupScreen::new())),
         "ping" => Some(Box::new(ping::PingScreen::new())),
+        "power" => Some(Box::new(power::PowerScreen::new())),
         "proc_monitor" => Some(Box::new(proc_monitor::ProcMonitorScreen::new())),
         "system_monitor" => Some(Box::new(system_monitor::SystemMonitorScreen::new())),
         "update" => Some(Box::new(update::UpdateScreen::new(root))),
