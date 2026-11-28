@@ -28,8 +28,10 @@ pub const SCREEN_WIDTH: u32 = 320;
 /// Height of the virtual canvas.
 pub const SCREEN_HEIGHT: u32 = 240;
 /// Width of the scaled window on a desktop machine.
+#[allow(dead_code)]
 pub const WINDOW_WIDTH: u32 = 640;
 /// Height of the scaled window on a desktop machine.
+#[allow(dead_code)]
 pub const WINDOW_HEIGHT: u32 = 480;
 /// Refresh rate. The Python original uses 15 FPS, which is comfortable on a
 /// Pi Zero W and keeps the software renderer cheap.

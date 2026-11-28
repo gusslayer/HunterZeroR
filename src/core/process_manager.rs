@@ -51,6 +51,7 @@ impl ProcessManager {
         self.running.is_some()
     }
 
+    #[allow(dead_code)]
     pub fn running_label(&self) -> Option<&str> {
         self.running.as_ref().map(|task| task.label.as_str())
     }

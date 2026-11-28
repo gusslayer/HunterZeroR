@@ -29,6 +29,7 @@ pub enum Outcome {
 /// A full-screen module. Screens own their state; shared services are passed in
 /// so a module cannot accidentally create a second process manager or HUD.
 pub trait ToolScreen {
+    #[allow(dead_code)]
     fn title(&self) -> &str;
 
     fn handle(&mut self, action: Action, processes: &mut ProcessManager) -> Outcome;

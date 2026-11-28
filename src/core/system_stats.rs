@@ -694,6 +694,7 @@ fn format_elapsed(seconds: u64) -> String {
 }
 
 /// Snapshot written to `state/heartbeats/app.json`.
+#[allow(dead_code)]
 pub fn heartbeat_payload() -> serde_json::Value {
     serde_json::json!({
         "application": "hunterzero-rust",

@@ -304,7 +304,7 @@ fn last_meaningful_line(output: &str) -> Option<String> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .last()
+        .next_back()
         .map(|line| line.to_string())
 }
 

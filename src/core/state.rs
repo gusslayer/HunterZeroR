@@ -3,6 +3,7 @@
 //! Only the menu selection is essential. The file is deliberately forgiving: a
 //! corrupt or partially written state file must never prevent the kiosk from
 //! starting.
+#![allow(dead_code)]
 
 use std::io;
 use std::path::{Path, PathBuf};

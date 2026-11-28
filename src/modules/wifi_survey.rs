@@ -908,6 +908,7 @@ fn detect_wifi_ifaces() -> Vec<String> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 fn detect_wifi_iface() -> Option<String> {
     detect_wifi_ifaces().into_iter().next()
 }
@@ -997,7 +998,7 @@ pub fn parse_iw_link(output: &str) -> LinkInfo {
             }
         } else if let Some(rest) = line.strip_prefix("signal:") {
             // "-45 dBm"
-            let dbm_part = rest.trim().split_whitespace().next().unwrap_or("");
+            let dbm_part = rest.split_whitespace().next().unwrap_or("");
             if let Ok(dbm) = dbm_part.parse::<i32>() {
                 info.signal_dbm = Some(dbm);
             }
@@ -1035,7 +1036,7 @@ pub fn parse_iw_scan(output: &str) -> Vec<ScanEntry> {
                     ssid.clone()
                 },
                 bssid: b,
-                channel: freq.and_then(|f| freq_to_channel(f)),
+                channel: freq.and_then(freq_to_channel),
                 signal_dbm: *signal,
             });
         }
@@ -1064,7 +1065,7 @@ pub fn parse_iw_scan(output: &str) -> Vec<ScanEntry> {
             freq = rest.trim().parse::<u32>().ok();
         } else if let Some(rest) = line.strip_prefix("signal:") {
             // "-45.00 dBm"
-            let token = rest.trim().split_whitespace().next().unwrap_or("");
+            let token = rest.split_whitespace().next().unwrap_or("");
             if let Ok(v) = token.parse::<f32>() {
                 signal = Some(v.round() as i32);
             } else if let Ok(v) = token.parse::<i32>() {
@@ -1176,6 +1177,7 @@ pub fn signal_ratio(dbm: i32) -> f32 {
     (clamped + 90.0) / 60.0
 }
 
+#[allow(dead_code)]
 pub fn dbm_to_y(dbm: i32) -> i32 {
     dbm_to_y_range(dbm, -90, -30)
 }
@@ -1221,12 +1223,12 @@ fn avg_range(history: &VecDeque<i32>, start: usize, end: usize) -> i32 {
 
 fn blend(fg: Color, bg: Color) -> Color {
     // simple 1/4 tint for under-curve fill
-    let fr = ((fg >> 16) & 0xFF) as u32;
-    let fg_g = ((fg >> 8) & 0xFF) as u32;
-    let fb = (fg & 0xFF) as u32;
-    let br = ((bg >> 16) & 0xFF) as u32;
-    let bg_g = ((bg >> 8) & 0xFF) as u32;
-    let bb = (bg & 0xFF) as u32;
+    let fr = (fg >> 16) & 0xFF;
+    let fg_g = (fg >> 8) & 0xFF;
+    let fb = fg & 0xFF;
+    let br = (bg >> 16) & 0xFF;
+    let bg_g = (bg >> 8) & 0xFF;
+    let bb = bg & 0xFF;
     let mix = |f: u32, b: u32| -> u8 { ((f + b * 3) / 4) as u8 };
     rgb(mix(fr, br), mix(fg_g, bg_g), mix(fb, bb))
 }

@@ -305,6 +305,7 @@ const KEY_DOWN: u16 = 108;
 const BTN_A: u16 = 304;
 const BTN_B: u16 = 305;
 const BTN_NORTH: u16 = 307;
+#[allow(dead_code)]
 const BTN_WEST: u16 = 308;
 const BTN_START: u16 = 315;
 const BTN_MODE: u16 = 316;

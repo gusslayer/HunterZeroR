@@ -52,6 +52,7 @@ pub fn draw_chevron(canvas: &mut Canvas, x: i32, y: i32, width: i32, height: i32
 }
 
 /// Render one selectable row with a consistent pixel-art style.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_row(
     canvas: &mut Canvas,
     x: i32,
@@ -115,6 +116,7 @@ pub fn draw_row(
 }
 
 /// Draw small arrows when a panel has rows hidden above or below.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_scroll_indicator(
     canvas: &mut Canvas,
     x: i32,
@@ -145,6 +147,7 @@ pub fn draw_scroll_indicator(
 }
 
 /// Draw a boxed action key and return its width so the caption can follow.
+#[allow(dead_code)]
 pub fn draw_keycap(canvas: &mut Canvas, label: &str, x: i32, y: i32, color: Color) -> i32 {
     let label = font::plain_text(label).to_ascii_uppercase();
     let width = font::text_width(&label, 1) + 6;
@@ -154,6 +157,7 @@ pub fn draw_keycap(canvas: &mut Canvas, label: &str, x: i32, y: i32, color: Colo
 }
 
 /// Draw a segmented bar representing a clamped 0..100 percentage.
+#[allow(dead_code)]
 pub fn draw_meter(
     canvas: &mut Canvas,
     x: i32,

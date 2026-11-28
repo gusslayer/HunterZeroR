@@ -472,6 +472,7 @@ pub fn text_width(text: &str, scale: i32) -> i32 {
 }
 
 /// Height in pixels of a line at the requested integer scale.
+#[allow(dead_code)]
 pub fn text_height(scale: i32) -> i32 {
     8 * scale.max(1)
 }

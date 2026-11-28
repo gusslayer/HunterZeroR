@@ -25,6 +25,7 @@ enum Phase {
     Help,
 }
 
+#[allow(dead_code)]
 pub struct ToolSpec {
     pub title: &'static str,
     pub parameter_label: &'static str,
@@ -35,9 +36,12 @@ pub struct ToolSpec {
     pub option_values: &'static [&'static str],
     pub option_multi: bool,
     pub help: &'static [HelpSection],
-    pub command_builder: fn(&str, u32, Option<&str>) -> Result<Vec<String>, String>,
-    pub timeout_for: fn(u32) -> u64,
+    pub command_builder: CommandBuilder,
+    pub timeout_for: TimeoutFor,
 }
+
+type CommandBuilder = fn(&str, u32, Option<&str>) -> Result<Vec<String>, String>;
+type TimeoutFor = fn(u32) -> u64;
 
 pub struct ParameterizedScreen {
     spec: ToolSpec,

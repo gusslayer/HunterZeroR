@@ -38,6 +38,7 @@ impl Canvas {
     }
 
     /// Pixels as bytes (little-endian ARGB8888, which SDL calls ARGB8888).
+    #[allow(dead_code)]
     pub fn as_bytes(&self) -> &[u8] {
         // SAFETY: `u32` has no padding and the slice length is exact.  SDL's
         // ARGB8888 format uses the same byte order on the little-endian hosts
@@ -182,7 +183,7 @@ impl Canvas {
                         if ty < 0 || ty >= self.height {
                             continue;
                         }
-                        let base = ty * self.width as i32;
+                        let base = ty * self.width;
                         for (column_index, bit) in row.chars().enumerate() {
                             if bit == '1' {
                                 let tx = cursor + column_index as i32;
@@ -240,6 +241,7 @@ impl Canvas {
     }
 
     /// Draw text centred inside a horizontal span.
+    #[allow(dead_code)]
     pub fn draw_text_centered(
         &mut self,
         text: &str,
@@ -277,6 +279,7 @@ impl Canvas {
     }
 
     /// Wrap text into lines of at most `max_chars` characters.
+    #[allow(dead_code)]
     pub fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
         wrap_text(text, max_chars)
     }

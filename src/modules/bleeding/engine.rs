@@ -67,6 +67,7 @@ impl Kind {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Device {
     pub address: String,
     pub name: String,
@@ -76,6 +77,7 @@ pub struct Device {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Characteristic {
     pub uuid: String,
     pub description: String,
@@ -83,6 +85,7 @@ pub struct Characteristic {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Service {
     pub name: String,
     pub description: String,
@@ -251,6 +254,7 @@ impl BluetoothEngine {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start_deauth(
         &mut self,
         address: &str,
@@ -436,6 +440,7 @@ fn run_enumeration(context: JobContext, target: String, mode: Mode) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_deauth(
     context: JobContext,
     target: String,
