@@ -434,9 +434,18 @@ echo "Manteniendo GPIO $POWER_ENABLE_LINE en alto y esperando GPIO $POWER_BUTTON
 gpioset -c "$GPIO_CHIP" -C "$CONSUMER" "$POWER_ENABLE_LINE=1" &
 enable_pid=$!
 
+initial_level=""
 if command -v gpioget >/dev/null 2>&1; then
     initial_level="$(gpioget -c "$GPIO_CHIP" -C "$CONSUMER" "$POWER_BUTTON_LINE" 2>&1 || true)"
     echo "GPIO $POWER_BUTTON_LINE al iniciar: $initial_level"
+fi
+
+if [[ "$initial_level" == *"inactive"* ]]; then
+    echo "GPIO $POWER_BUTTON_LINE ya en bajo; esperando liberación antes de vigilar apagado..."
+    trap 'kill "${enable_pid:-}" 2>/dev/null || true; exit 0' INT TERM
+    gpiomon -c "$GPIO_CHIP" -C "$CONSUMER" -e rising -b pull-up -p 100ms -n 1 \
+        "$POWER_BUTTON_LINE" >/dev/null || true
+    trap - INT TERM
 fi
 
 gpiomon -c "$GPIO_CHIP" -C "$CONSUMER" -e falling -b pull-up -p 100ms -n 1 \
