@@ -140,6 +140,7 @@ POWER_BUTTON_LINE="${HUNTERZERO_POWER_BUTTON_LINE:-26}"
 POWER_ENABLE_LINE="${HUNTERZERO_POWER_ENABLE_LINE:-27}"
 CONSUMER="hunterzero-poweroff"
 SHUTDOWN_BIN="${HUNTERZERO_SHUTDOWN_BIN:-/usr/sbin/shutdown}"
+shutdown_initiated=0
 
 for tool in gpioset gpiomon; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -177,12 +178,28 @@ gpiomon -c "$GPIO_CHIP" -C "$CONSUMER" -e falling -b pull-up -p 100ms -n 1 \
 monitor_pid=$!
 echo "Vigilando flanco descendente en GPIO $POWER_BUTTON_LINE (chip $GPIO_CHIP)."
 
-cleanup() {
-    kill "$enable_pid" "$monitor_pid" 2>/dev/null || true
-    wait "$enable_pid" "$monitor_pid" 2>/dev/null || true
+is_system_stopping() {
+    local state
+    state="$(systemctl is-system-running 2>/dev/null || true)"
+    [[ "$state" == "stopping" ]]
 }
+
+cleanup() {
+    local keep_latch="${1:-0}"
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+    if [[ "$keep_latch" -eq 0 && "$shutdown_initiated" -eq 0 ]] && ! is_system_stopping; then
+        kill "$enable_pid" 2>/dev/null || true
+        wait "$enable_pid" 2>/dev/null || true
+    fi
+}
+
 on_signal() {
-    cleanup
+    if [[ "$shutdown_initiated" -ne 0 ]] || is_system_stopping; then
+        cleanup 1
+        exit 0
+    fi
+    cleanup 0
     exit 0
 }
 trap cleanup EXIT
@@ -198,9 +215,15 @@ if [[ "${finished_pid:-}" != "$monitor_pid" || "$finished_status" -ne 0 ]]; then
     exit 1
 fi
 
+shutdown_initiated=1
 echo "Botón de encendido pulsado: apagando el equipo."
 sync
-"$SHUTDOWN_BIN" -h now
+"$SHUTDOWN_BIN" -h now || {
+    echo "Fallo al ejecutar $SHUTDOWN_BIN; intentando systemctl poweroff." >&2
+    systemctl poweroff || true
+}
+# Mantener GPIO 27 en alto hasta que el sistema corte energía.
+wait "$enable_pid" 2>/dev/null || true
 POWEROFF
 $SUDO chmod +x /usr/local/bin/hunterzero-poweroff
 
@@ -215,6 +238,9 @@ StartLimitIntervalSec=0
 Type=simple
 User=root
 ExecStart=/usr/local/bin/hunterzero-poweroff
+# Mantener solo el proceso principal bajo control de systemd; gpioset debe
+# sobrevivir durante el apagado para no soltar el latch GPIO 27.
+KillMode=process
 # Reinicia también tras una salida limpia: si el monitor se detiene por cualquier
 # motivo, el botón físico debe seguir operativo sin intervención manual.
 Restart=always
