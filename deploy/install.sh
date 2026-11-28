@@ -447,7 +447,13 @@ echo "Vigilando flanco descendente en GPIO $POWER_BUTTON_LINE (chip $GPIO_CHIP).
 is_system_stopping() {
     local state
     state="$(systemctl is-system-running 2>/dev/null || true)"
-    [[ "$state" == "stopping" ]]
+    case "$state" in
+        stopping|offline) return 0 ;;
+    esac
+    if systemctl list-jobs --no-legend 2>/dev/null | grep -Eq 'shutdown\.target|poweroff\.target|reboot\.target|halt\.target'; then
+        return 0
+    fi
+    [[ -f /run/nologin ]]
 }
 
 cleanup() {

@@ -14,24 +14,17 @@ done
 log "Actualizando repositorio..."
 git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
-git pull --ff-only
+git pull --ff-only || warn "git pull falló; se continúa con la versión local."
 AFTER="$(git rev-parse HEAD 2>/dev/null || echo none)"
 
+NEED_BUILD=1
 if [[ "$BEFORE" == "$AFTER" ]]; then
-  log "Ya estás en la última versión ($AFTER)."
-  exit 0
+  log "Sin cambios git ($AFTER). Se verificará configuración y servicio."
+  NEED_BUILD=0
+else
+  log "Cambios detectados: $BEFORE -> $AFTER"
+  log "Compilando nueva versión..."
 fi
-
-log "Cambios detectados: $BEFORE -> $AFTER"
-log "Compilando nueva versión..."
-
-# Cargar cargo si hace falta
-if ! command -v cargo >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
-  # shellcheck source=/dev/null
-  . "$HOME/.cargo/env"
-fi
-export PATH="$HOME/.cargo/bin:$PATH"
-command -v cargo >/dev/null 2>&1 || { warn "cargo no encontrado; no se puede compilar."; exit 1; }
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   SUDO=""
@@ -39,51 +32,69 @@ else
   SUDO="sudo"
 fi
 
-JOBS=1
-if [[ -r /proc/meminfo ]]; then
-  MEM_KB="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
-  [[ "${MEM_KB}" -lt 900000 ]] && JOBS=1 || JOBS=2
-fi
-
-# Pi Zero has 512 MB RAM; a release build needs a temporary swap file.
-SWAP_FILE="/var/swap-hunterzero"
-cleanup_update_swap() {
-  if swapon --show 2>/dev/null | grep -q "$SWAP_FILE"; then
-    $SUDO swapoff "$SWAP_FILE" || true
-  fi
-  [[ -f "$SWAP_FILE" ]] && $SUDO rm -f "$SWAP_FILE" || true
-}
-if [[ -r /proc/meminfo && "${MEM_KB:-0}" -lt 900000 ]] &&
-  ! swapon --show 2>/dev/null | grep -q .; then
-  if [[ ! -f "$SWAP_FILE" ]]; then
-    $SUDO fallocate -l 1G "$SWAP_FILE" 2>/dev/null ||
-      $SUDO dd if=/dev/zero of="$SWAP_FILE" bs=1M count=1024 status=none
-    $SUDO chmod 600 "$SWAP_FILE"
-    $SUDO mkswap "$SWAP_FILE" >/dev/null
-  fi
-  if $SUDO swapon "$SWAP_FILE"; then
-    trap cleanup_update_swap EXIT
-  else
-    warn "No se pudo activar swap temporal; la compilación puede fallar por OOM."
-  fi
-fi
-
-CARGO_BUILD_JOBS="$JOBS" cargo build --release -j "$JOBS"
-
 BIN_SRC="$ROOT_DIR/target/release/hunterzero-rust"
 BIN_DST="/usr/local/bin/hunterzero-rust"
-if [[ ! -f "$BIN_SRC" ]]; then
-  warn "No se encontró binario compilado en $BIN_SRC"
-  exit 1
-fi
-
-log "Instalando binario..."
-$SUDO cp "$BIN_SRC" "$BIN_DST"
-$SUDO chmod +x "$BIN_DST"
-
-# Mantener servicio systemd actualizado (útil en SD nueva o instalaciones antiguas)
 SERVICE_NAME="hunterzero.service"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
+
+if [[ "$NEED_BUILD" -eq 0 && ! -f "$BIN_DST" ]]; then
+  log "No hay binario instalado; se forzará compilación."
+  NEED_BUILD=1
+fi
+
+if [[ "$NEED_BUILD" -eq 1 ]]; then
+  # Cargar cargo si hace falta
+  if ! command -v cargo >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck source=/dev/null
+    . "$HOME/.cargo/env"
+  fi
+  export PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1 || { warn "cargo no encontrado; no se puede compilar."; exit 1; }
+
+  JOBS=1
+  if [[ -r /proc/meminfo ]]; then
+    MEM_KB="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+    [[ "${MEM_KB}" -lt 900000 ]] && JOBS=1 || JOBS=2
+  fi
+
+  # Pi Zero has 512 MB RAM; a release build needs a temporary swap file.
+  SWAP_FILE="/var/swap-hunterzero"
+  cleanup_update_swap() {
+    if swapon --show 2>/dev/null | grep -q "$SWAP_FILE"; then
+      $SUDO swapoff "$SWAP_FILE" || true
+    fi
+    [[ -f "$SWAP_FILE" ]] && $SUDO rm -f "$SWAP_FILE" || true
+  }
+  if [[ -r /proc/meminfo && "${MEM_KB:-0}" -lt 900000 ]] &&
+    ! swapon --show 2>/dev/null | grep -q .; then
+    if [[ ! -f "$SWAP_FILE" ]]; then
+      $SUDO fallocate -l 1G "$SWAP_FILE" 2>/dev/null ||
+        $SUDO dd if=/dev/zero of="$SWAP_FILE" bs=1M count=1024 status=none
+      $SUDO chmod 600 "$SWAP_FILE"
+      $SUDO mkswap "$SWAP_FILE" >/dev/null
+    fi
+    if $SUDO swapon "$SWAP_FILE"; then
+      trap cleanup_update_swap EXIT
+    else
+      warn "No se pudo activar swap temporal; la compilación puede fallar por OOM."
+    fi
+  fi
+
+  CARGO_BUILD_JOBS="$JOBS" cargo build --release -j "$JOBS"
+
+  if [[ ! -f "$BIN_SRC" ]]; then
+    warn "No se encontró binario compilado en $BIN_SRC"
+    exit 1
+  fi
+
+  log "Instalando binario..."
+  $SUDO cp "$BIN_SRC" "$BIN_DST"
+  $SUDO chmod +x "$BIN_DST"
+else
+  log "Omitiendo compilación; se aplicará configuración/servicio."
+fi
+
+# Mantener servicio systemd actualizado (útil en SD nueva o instalaciones antiguas)
 $SUDO tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=HunterZero-Rust Application
@@ -181,7 +192,13 @@ echo "Vigilando flanco descendente en GPIO $POWER_BUTTON_LINE (chip $GPIO_CHIP).
 is_system_stopping() {
     local state
     state="$(systemctl is-system-running 2>/dev/null || true)"
-    [[ "$state" == "stopping" ]]
+    case "$state" in
+        stopping|offline) return 0 ;;
+    esac
+    if systemctl list-jobs --no-legend 2>/dev/null | grep -Eq 'shutdown\.target|poweroff\.target|reboot\.target|halt\.target'; then
+        return 0
+    fi
+    [[ -f /run/nologin ]]
 }
 
 cleanup() {
